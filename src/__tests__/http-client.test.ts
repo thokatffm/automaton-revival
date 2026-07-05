@@ -522,6 +522,31 @@ describe("ResilientHttpClient", () => {
       expect(callCount).toBe(1); // No retries
     });
 
+    it("does not retry a retryable 5xx status when retries:0 is set", async () => {
+      // Non-idempotent calls (e.g. SIWE /verify, whose nonce is single-use)
+      // opt out of retries so the real error surfaces instead of being masked
+      // by a retry that reuses spent state.
+      const client = new ResilientHttpClient({
+        maxRetries: 3,
+        backoffBase: 1,
+        backoffMax: 10,
+      });
+
+      let callCount = 0;
+      globalThis.fetch = vi.fn().mockImplementation(() => {
+        callCount++;
+        return Promise.resolve(mockResponse(500, { error: "Database error" }));
+      });
+
+      const resp = await client.request("https://api.example.com/verify", {
+        method: "POST",
+        retries: 0,
+      });
+
+      expect(resp.status).toBe(500);
+      expect(callCount).toBe(1); // No retries: the 500 surfaces directly
+    });
+
     it("allows per-request timeout override", async () => {
       const client = new ResilientHttpClient({
         baseTimeout: 30_000,

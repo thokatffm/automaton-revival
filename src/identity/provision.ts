@@ -123,10 +123,16 @@ export async function provision(
     verifyBody.chain_type = "solana";
   }
 
+  // The nonce is single-use: the server consumes it on the first verify
+  // attempt. Retrying reuses a spent nonce, so any real error (e.g. a 500
+  // while persisting the session) gets masked as a misleading
+  // "401 Invalid or expired nonce" from the retry. Disable retries here so the
+  // true verification error surfaces to the caller.
   const verifyResp = await httpClient.request(`${url}/v1/auth/verify`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(verifyBody),
+    retries: 0,
   });
 
   if (!verifyResp.ok) {
