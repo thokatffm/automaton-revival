@@ -655,7 +655,10 @@ export function createBuiltinTools(sandboxId: string): AutomatonTool[] {
         let appliedSummary: string;
         try {
           if (commit) {
-            await run(`git cherry-pick ${commit}`);
+            if (!/^[a-f0-9]{7,40}$/i.test(commit)) {
+              return `Blocked: invalid commit hash "${commit}"`;
+            }
+            await run(`git cherry-pick -- ${escapeShellArg(commit)}`);
             appliedSummary = `Cherry-picked ${commit}`;
           } else {
             await run("git pull origin main --ff-only");
