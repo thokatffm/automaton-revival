@@ -9,6 +9,7 @@
 import { execSync } from "child_process";
 import fs from "fs";
 import nodePath from "path";
+import os from "os";
 import type {
   ConwayClient,
   ExecResult,
@@ -114,7 +115,7 @@ export function createConwayClient(options: ConwayClientOptions): ConwayClient {
         timeout: timeout || 30_000,
         encoding: "utf-8",
         maxBuffer: 10 * 1024 * 1024,
-        cwd: process.env.HOME || "/root",
+        cwd: process.env.HOME || os.homedir() || "/root",
       });
       return { stdout: stdout || "", stderr: "", exitCode: 0 };
     } catch (err: any) {
@@ -165,7 +166,7 @@ export function createConwayClient(options: ConwayClientOptions): ConwayClient {
 
   const resolveLocalPath = (filePath: string): string =>
     filePath.startsWith("~")
-      ? nodePath.join(process.env.HOME || "/root", filePath.slice(1))
+      ? nodePath.join(process.env.HOME || os.homedir() || "/root", filePath.slice(1))
       : filePath;
 
   const writeFile = async (

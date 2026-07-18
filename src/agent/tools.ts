@@ -142,7 +142,12 @@ export function createBuiltinTools(sandboxId: string): AutomatonTool[] {
     {
       name: "exec",
       description:
-        "Execute a shell command in your sandbox. Returns stdout, stderr, and exit code.",
+        process.platform === "win32"
+          ? "Execute a shell command in your sandbox. This host is Windows and commands run " +
+            "via cmd.exe — use Windows commands (dir, type, findstr, etc.) or 'wsl <command>' " +
+            "if WSL is available, NOT POSIX commands like ls/cat/grep, and note that cmd.exe " +
+            "does not expand '~' for the home directory. Returns stdout, stderr, and exit code."
+          : "Execute a shell command in your sandbox. Returns stdout, stderr, and exit code.",
       category: "vm",
       riskLevel: "caution",
       parameters: {

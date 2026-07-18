@@ -8,6 +8,7 @@
 import fs from "fs";
 import crypto from "crypto";
 import path from "path";
+import os from "os";
 import type Database from "better-sqlite3";
 import { createLogger } from "../observability/logger.js";
 
@@ -91,7 +92,7 @@ If you fail to create value, you lose compute and die.`;
  */
 function loadConstitution(): string {
   const locations = [
-    path.join(process.env.HOME || "/root", ".automaton", "constitution.md"),
+    path.join(process.env.HOME || os.homedir() || "/root", ".automaton", "constitution.md"),
     path.join(process.cwd(), "constitution.md"),
   ];
   for (const loc of locations) {
@@ -762,7 +763,7 @@ ${orchestratorStatus}
  */
 function loadSoulMd(): string | null {
   try {
-    const home = process.env.HOME || "/root";
+    const home = process.env.HOME || os.homedir() || "/root";
     const soulPath = path.join(home, ".automaton", "SOUL.md");
     if (fs.existsSync(soulPath)) {
       return fs.readFileSync(soulPath, "utf-8");
@@ -778,7 +779,7 @@ function loadSoulMd(): string | null {
  */
 function loadWorklog(): string | null {
   try {
-    const home = process.env.HOME || "/root";
+    const home = process.env.HOME || os.homedir() || "/root";
     const worklogPath = path.join(home, ".automaton", "WORKLOG.md");
     if (fs.existsSync(worklogPath)) {
       return fs.readFileSync(worklogPath, "utf-8");

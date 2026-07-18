@@ -5,9 +5,12 @@
  * genesis alignment, soul tools, schema migration.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import Database from "better-sqlite3";
 import { ulid } from "ulid";
+import fs from "fs";
+import os from "os";
+import path from "path";
 import {
   parseSoulMd,
   writeSoulMd,
@@ -295,6 +298,49 @@ Focus on growth
     expect(soul.corePurpose).not.toContain("Survive");
     expect(soul.values).toHaveLength(2);
     expect(soul.strategy).toBe("Focus on growth");
+  });
+});
+
+// ─── Soul Model - loadCurrentSoul home resolution (#165) ───────
+
+describe("Soul Model - loadCurrentSoul home directory resolution", () => {
+  let originalHome: string | undefined;
+  let tmpHome: string;
+
+  beforeEach(() => {
+    originalHome = process.env.HOME;
+    tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "automaton-soul-home-test-"));
+  });
+
+  afterEach(() => {
+    if (originalHome === undefined) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = originalHome;
+    }
+    fs.rmSync(tmpHome, { recursive: true, force: true });
+    vi.restoreAllMocks();
+  });
+
+  it("falls back to os.homedir() instead of a hardcoded '/root' when HOME is unset", () => {
+    // Regression for #165: on Windows, process.env.HOME is not set (Windows
+    // uses USERPROFILE), so the old `process.env.HOME || "/root"` fallback
+    // always resolved to a path that doesn't exist there, and SOUL.md was
+    // never found. Simulate that by deleting HOME and stubbing os.homedir()
+    // to point at a directory with a SOUL.md the old code would have missed.
+    delete process.env.HOME;
+    vi.spyOn(os, "homedir").mockReturnValue(tmpHome);
+
+    const automatonDir = path.join(tmpHome, ".automaton");
+    fs.mkdirSync(automatonDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(automatonDir, "SOUL.md"),
+      "# TestBot\n\n## Core Purpose\nSurvive.\n",
+    );
+
+    const soul = loadCurrentSoul(null);
+    expect(soul).not.toBeNull();
+    expect(soul?.corePurpose).toBe("Survive.");
   });
 });
 
