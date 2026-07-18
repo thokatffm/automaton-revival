@@ -25,6 +25,24 @@ import { createLogger } from "../observability/logger.js";
 
 const logger = createLogger("tools");
 
+// ─── Credit Transfer Mutex ─────────────────────────────────────
+// Serializes balance-check-and-transfer critical sections (transfer_credits,
+// fund_child) to close a TOCTOU race (CWE-367): without this, two concurrent
+// transfers can each read the same starting balance, both pass the "no more
+// than half" guard, and together exceed it.
+let creditTransferLock: Promise<unknown> = Promise.resolve();
+
+function withCreditTransferLock<T>(fn: () => Promise<T>): Promise<T> {
+  const run = creditTransferLock.then(fn);
+  // The shared chain always resolves, even if this call failed, so a
+  // failed transfer doesn't permanently wedge the lock for later callers.
+  creditTransferLock = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
+
 // ─── Path Confinement ─────────────────────────────────────────
 // write_file is restricted to the sandbox home directory tree.
 // The sandbox home is /root for both local and remote execution.
@@ -1034,17 +1052,30 @@ Model: ${ctx.inference.getDefaultModel()}
           return `Blocked: amount_cents must be a positive number, got ${amount}.`;
         }
 
-        // Guard: don't transfer more than half your balance
-        const balance = await ctx.conway.getCreditsBalance();
-        if (amount > balance / 2) {
-          return `Blocked: Cannot transfer more than half your balance ($${(balance / 100).toFixed(2)}). Self-preservation.`;
-        }
+        // Guard: don't transfer more than half your balance.
+        // The balance-check-and-transfer below must be atomic — otherwise
+        // two concurrent transfers can each pass the guard against the same
+        // starting balance and together exceed it (CWE-367, TOCTOU).
+        const outcome = await withCreditTransferLock(async () => {
+          const balance = await ctx.conway.getCreditsBalance();
+          if (amount > balance / 2) {
+            return {
+              blocked: `Blocked: Cannot transfer more than half your balance ($${(balance / 100).toFixed(2)}). Self-preservation.`,
+            } as const;
+          }
 
-        const transfer = await ctx.conway.transferCredits(
-          args.to_address as string,
-          amount,
-          args.reason as string | undefined,
-        );
+          const transfer = await ctx.conway.transferCredits(
+            args.to_address as string,
+            amount,
+            args.reason as string | undefined,
+          );
+          return { blocked: undefined, balance, transfer };
+        });
+
+        if (outcome.blocked) {
+          return outcome.blocked;
+        }
+        const { balance, transfer } = outcome;
 
         const { ulid } = await import("ulid");
         ctx.db.insertTransaction({
@@ -1773,16 +1804,28 @@ Model: ${ctx.inference.getDefaultModel()}
           return `Blocked: amount_cents must be a positive number, got ${amount}.`;
         }
 
-        const balance = await ctx.conway.getCreditsBalance();
-        if (amount > balance / 2) {
-          return `Blocked: Cannot transfer more than half your balance. Self-preservation.`;
-        }
+        // Balance-check-and-transfer must be atomic — see transfer_credits
+        // for the TOCTOU rationale (CWE-367).
+        const outcome = await withCreditTransferLock(async () => {
+          const balance = await ctx.conway.getCreditsBalance();
+          if (amount > balance / 2) {
+            return {
+              blocked: `Blocked: Cannot transfer more than half your balance. Self-preservation.`,
+            } as const;
+          }
 
-        const transfer = await ctx.conway.transferCredits(
-          child.address,
-          amount,
-          `fund child ${child.id}`,
-        );
+          const transfer = await ctx.conway.transferCredits(
+            child.address,
+            amount,
+            `fund child ${child.id}`,
+          );
+          return { blocked: undefined, balance, transfer };
+        });
+
+        if (outcome.blocked) {
+          return outcome.blocked;
+        }
+        const { balance, transfer } = outcome;
 
         const { ulid } = await import("ulid");
         ctx.db.insertTransaction({

@@ -581,6 +581,27 @@ describe("transfer_credits self-preservation", () => {
     expect(result).toContain("Blocked");
     expect(result).toContain("positive number");
   });
+
+  it("serializes concurrent transfers instead of racing on a stale balance (CWE-367)", async () => {
+    // $100 balance, two concurrent $40 transfers. The guard is "no more
+    // than half the CURRENT balance": once the first transfer succeeds,
+    // balance is $60, so the second $40 request (> $30, half of $60) must
+    // be blocked — not silently allowed against the stale $100 balance
+    // both requests would see without serialization.
+    const transferTool = tools.find((t) => t.name === "transfer_credits")!;
+    const [first, second] = await Promise.all([
+      transferTool.execute({ to_address: "0xa", amount_cents: 4000 }, ctx),
+      transferTool.execute({ to_address: "0xb", amount_cents: 4000 }, ctx),
+    ]);
+
+    const results = [first, second];
+    const succeeded = results.filter((r) => r.includes("transfer submitted"));
+    const blocked = results.filter((r) => r.includes("Blocked"));
+
+    expect(succeeded).toHaveLength(1);
+    expect(blocked).toHaveLength(1);
+    expect(conway.creditsCents).toBe(6000);
+  });
 });
 
 // ─── Tool Category Checks ───────────────────────────────────────
