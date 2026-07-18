@@ -23,6 +23,12 @@ vi.mock("../agent/injection-defense.js", () => ({
   sanitizeInput: vi.fn((s: string) => ({ content: s, blocked: false })),
 }));
 
+// Mock DNS resolution so isAllowedUri's rebinding check doesn't require
+// network access in tests; example.com resolves to a public IP.
+vi.mock("node:dns/promises", () => ({
+  lookup: vi.fn(async () => [{ address: "93.184.216.34", family: 4 }]),
+}));
+
 // Import after mocks are set up
 const { fetchAgentCard, isAllowedUri } = await import("../registry/discovery.js");
 
@@ -131,7 +137,7 @@ describe("fetchAgentCard — data: URI handling", () => {
     expect(result).toBeNull();
 
     // Confirm isAllowedUri rejects data:text/html
-    expect(isAllowedUri(uri)).toBe(false);
+    expect(await isAllowedUri(uri)).toBe(false);
   });
 
   it("returns null when validateAgentCard rejects schema", async () => {
@@ -150,6 +156,6 @@ describe("fetchAgentCard — data: URI handling", () => {
     // it doesn't go through the data: path.
     const httpsUri = "https://example.com/agent-card.json";
     expect(httpsUri.startsWith("data:application/json")).toBe(false);
-    expect(isAllowedUri(httpsUri)).toBe(true);
+    expect(await isAllowedUri(httpsUri)).toBe(true);
   });
 });

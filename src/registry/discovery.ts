@@ -17,6 +17,7 @@ import { DEFAULT_DISCOVERY_CONFIG } from "../types.js";
 import { queryAgent, getTotalAgents, getRegisteredAgentsByEvents } from "./erc8004.js";
 import { keccak256, toBytes } from "viem";
 import { createLogger } from "../observability/logger.js";
+import { lookup as dnsLookup } from "node:dns/promises";
 const logger = createLogger("registry.discovery");
 
 type Network = "mainnet" | "testnet";
@@ -27,11 +28,36 @@ const DISCOVERY_TIMEOUT_MS = 60_000;
 // ─── SSRF Protection ────────────────────────────────────────────
 
 /**
- * Check if a hostname resolves to an internal/private network.
+ * Unwrap an IPv6-mapped IPv4 address (e.g. "::ffff:127.0.0.1" or the
+ * compressed hex form "::ffff:7f00:1") to its dotted-quad IPv4 form.
+ * Returns the input unchanged if it isn't an IPv4-mapped address.
+ */
+function unwrapIPv4MappedAddress(address: string): string {
+  const stripped = address.replace(/^\[|\]$/g, "");
+  const dotted = stripped.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/i);
+  if (dotted) return dotted[1];
+  const hex = stripped.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i);
+  if (hex) {
+    const hi = parseInt(hex[1], 16);
+    const lo = parseInt(hex[2], 16);
+    return `${(hi >> 8) & 0xff}.${hi & 0xff}.${(lo >> 8) & 0xff}.${lo & 0xff}`;
+  }
+  return stripped;
+}
+
+/**
+ * Check if a hostname or IP literal is an internal/private network address.
  * Blocks: 127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12,
- *         192.168.0.0/16, 169.254.0.0/16, ::1, localhost, 0.0.0.0/8
+ *         192.168.0.0/16, 169.254.0.0/16, ::1, localhost, 0.0.0.0/8,
+ *         and IPv6-mapped forms of the above.
+ *
+ * This is a literal string check only — it does NOT resolve DNS, so a
+ * hostname that *resolves* to a private IP will not be caught here.
+ * Use `isAllowedUri` (which does resolve DNS) to fully validate a URI
+ * before fetching it.
  */
 export function isInternalNetwork(hostname: string): boolean {
+  const normalized = unwrapIPv4MappedAddress(hostname);
   const blocked = [
     /^127\./,
     /^10\./,
@@ -42,19 +68,41 @@ export function isInternalNetwork(hostname: string): boolean {
     /^localhost$/i,
     /^0\./,
   ];
-  return blocked.some(pattern => pattern.test(hostname));
+  return blocked.some(pattern => pattern.test(normalized));
+}
+
+/**
+ * Resolve `hostname` via DNS and check whether ANY resolved address is
+ * an internal/private network address. Closes the DNS-rebinding gap where
+ * an attacker-controlled domain resolves to a private IP (CWE-918):
+ * checking the hostname string alone is not sufficient.
+ *
+ * Fails closed: if resolution errors (NXDOMAIN, no network, etc.), the
+ * hostname is treated as blocked, since we can't prove it's safe to fetch.
+ */
+async function resolvesToInternalNetwork(hostname: string): Promise<boolean> {
+  if (isInternalNetwork(hostname)) return true;
+  try {
+    const results = await dnsLookup(hostname, { all: true });
+    return results.some((r) => isInternalNetwork(r.address));
+  } catch {
+    return true;
+  }
 }
 
 /**
  * Check if a URI is allowed for fetching.
  * Only https: and ipfs: schemes are permitted.
- * Internal network addresses are blocked (SSRF protection).
+ * Internal network addresses are blocked (SSRF protection), including
+ * hostnames that resolve to a private IP via DNS rebinding.
  */
-export function isAllowedUri(uri: string): boolean {
+export async function isAllowedUri(uri: string): Promise<boolean> {
   try {
     const url = new URL(uri);
     if (!['https:', 'ipfs:'].includes(url.protocol)) return false;
-    if (url.protocol === 'https:' && isInternalNetwork(url.hostname)) return false;
+    if (url.protocol === 'https:' && (await resolvesToInternalNetwork(url.hostname))) {
+      return false;
+    }
     return true;
   } catch {
     return false;
@@ -311,7 +359,7 @@ export async function fetchAgentCard(
   }
 
   // SSRF protection: validate URI before fetching
-  if (!isAllowedUri(uri)) {
+  if (!(await isAllowedUri(uri))) {
     logger.error(`Blocked URI (SSRF protection): ${uri}`);
     return null;
   }

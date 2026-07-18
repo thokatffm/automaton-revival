@@ -9,6 +9,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import Database from "better-sqlite3";
 import { MIGRATION_V7 } from "../state/schema.js";
 
+// Mock DNS resolution so isAllowedUri's rebinding check doesn't require
+// network access in tests; example.com resolves to a public IP.
+vi.mock("node:dns/promises", () => ({
+  lookup: vi.fn(async () => [{ address: "93.184.216.34", family: 4 }]),
+}));
+
 // ─── Test helpers ───────────────────────────────────────────────
 
 function createTestDb(): import("better-sqlite3").Database {
@@ -608,17 +614,17 @@ describe("Discovery", () => {
 
   it("isAllowedUri blocks HTTP", async () => {
     const { isAllowedUri } = await import("../registry/discovery.js");
-    expect(isAllowedUri("http://example.com/card.json")).toBe(false);
+    expect(await isAllowedUri("http://example.com/card.json")).toBe(false);
   });
 
   it("isAllowedUri allows HTTPS", async () => {
     const { isAllowedUri } = await import("../registry/discovery.js");
-    expect(isAllowedUri("https://example.com/card.json")).toBe(true);
+    expect(await isAllowedUri("https://example.com/card.json")).toBe(true);
   });
 
   it("isAllowedUri blocks localhost", async () => {
     const { isAllowedUri } = await import("../registry/discovery.js");
-    expect(isAllowedUri("https://localhost/card.json")).toBe(false);
+    expect(await isAllowedUri("https://localhost/card.json")).toBe(false);
   });
 });
 

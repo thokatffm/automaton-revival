@@ -27,8 +27,23 @@ vi.mock("../agent/injection-defense.js", () => ({
   sanitizeInput: vi.fn((s: string) => ({ content: s, blocked: false })),
 }));
 
+// Mock DNS resolution so isAllowedUri's rebinding check is deterministic
+// and doesn't require network access in tests. Hostnames not listed here
+// resolve to a public IP by default.
+const dnsMockAddresses: Record<string, string[]> = {
+  "example.com": ["93.184.216.34"],
+  "api.conway.tech": ["203.0.113.10"],
+};
+vi.mock("node:dns/promises", () => ({
+  lookup: vi.fn(async (hostname: string, _opts?: unknown) => {
+    const addresses = dnsMockAddresses[hostname] ?? ["203.0.113.99"];
+    return addresses.map((address) => ({ address, family: 4 }));
+  }),
+}));
+
 // Import after mocks are set up
 const { isAllowedUri, isInternalNetwork, validateAgentCard } = await import("../registry/discovery.js");
+const dns = await import("node:dns/promises");
 const { loadInstalledTools } = await import("../agent/tools.js");
 
 function makeTmpDbPath(): string {
@@ -109,40 +124,79 @@ describe("SSRF Protection", () => {
   });
 
   describe("isAllowedUri", () => {
-    it("allows https URIs", () => {
-      expect(isAllowedUri("https://example.com/agent-card.json")).toBe(true);
+    it("allows https URIs", async () => {
+      expect(await isAllowedUri("https://example.com/agent-card.json")).toBe(true);
     });
 
-    it("allows ipfs URIs", () => {
-      expect(isAllowedUri("ipfs://QmTest123")).toBe(true);
+    it("allows ipfs URIs", async () => {
+      expect(await isAllowedUri("ipfs://QmTest123")).toBe(true);
     });
 
-    it("blocks http URIs", () => {
-      expect(isAllowedUri("http://example.com/agent-card.json")).toBe(false);
+    it("blocks http URIs", async () => {
+      expect(await isAllowedUri("http://example.com/agent-card.json")).toBe(false);
     });
 
-    it("blocks file URIs", () => {
-      expect(isAllowedUri("file:///etc/passwd")).toBe(false);
+    it("blocks file URIs", async () => {
+      expect(await isAllowedUri("file:///etc/passwd")).toBe(false);
     });
 
-    it("blocks ftp URIs", () => {
-      expect(isAllowedUri("ftp://evil.com/data")).toBe(false);
+    it("blocks ftp URIs", async () => {
+      expect(await isAllowedUri("ftp://evil.com/data")).toBe(false);
     });
 
-    it("blocks javascript URIs", () => {
-      expect(isAllowedUri("javascript:alert(1)")).toBe(false);
+    it("blocks javascript URIs", async () => {
+      expect(await isAllowedUri("javascript:alert(1)")).toBe(false);
     });
 
-    it("blocks https URIs to internal networks", () => {
-      expect(isAllowedUri("https://127.0.0.1/card.json")).toBe(false);
-      expect(isAllowedUri("https://10.0.0.1/card.json")).toBe(false);
-      expect(isAllowedUri("https://192.168.1.1/card.json")).toBe(false);
-      expect(isAllowedUri("https://localhost/card.json")).toBe(false);
+    it("blocks https URIs to internal networks", async () => {
+      expect(await isAllowedUri("https://127.0.0.1/card.json")).toBe(false);
+      expect(await isAllowedUri("https://10.0.0.1/card.json")).toBe(false);
+      expect(await isAllowedUri("https://192.168.1.1/card.json")).toBe(false);
+      expect(await isAllowedUri("https://localhost/card.json")).toBe(false);
     });
 
-    it("blocks invalid URIs", () => {
-      expect(isAllowedUri("not-a-url")).toBe(false);
-      expect(isAllowedUri("")).toBe(false);
+    it("blocks invalid URIs", async () => {
+      expect(await isAllowedUri("not-a-url")).toBe(false);
+      expect(await isAllowedUri("")).toBe(false);
+    });
+
+    it("blocks DNS-rebinding: a hostname that resolves to a private IP (CWE-918)", async () => {
+      const dnsModule = dns as unknown as {
+        lookup: (hostname: string, opts?: unknown) => Promise<Array<{ address: string; family: number }>>;
+      };
+      vi.mocked(dnsModule.lookup).mockImplementationOnce(async () => [
+        { address: "127.0.0.1", family: 4 },
+      ]);
+      expect(await isAllowedUri("https://evil.attacker.com/card.json")).toBe(false);
+    });
+
+    it("blocks DNS-rebinding: one of several resolved addresses is private", async () => {
+      const dnsModule = dns as unknown as {
+        lookup: (hostname: string, opts?: unknown) => Promise<Array<{ address: string; family: number }>>;
+      };
+      vi.mocked(dnsModule.lookup).mockImplementationOnce(async () => [
+        { address: "203.0.113.5", family: 4 },
+        { address: "10.0.0.1", family: 4 },
+      ]);
+      expect(await isAllowedUri("https://multi-a-record.example/card.json")).toBe(false);
+    });
+
+    it("fails closed when DNS resolution errors", async () => {
+      const dnsModule = dns as unknown as {
+        lookup: (hostname: string, opts?: unknown) => Promise<Array<{ address: string; family: number }>>;
+      };
+      vi.mocked(dnsModule.lookup).mockImplementationOnce(async () => {
+        throw new Error("ENOTFOUND");
+      });
+      expect(await isAllowedUri("https://does-not-resolve.example/card.json")).toBe(false);
+    });
+
+    it("blocks IPv6-mapped IPv4 loopback (::ffff:127.0.0.1)", async () => {
+      expect(await isAllowedUri("https://[::ffff:127.0.0.1]/card.json")).toBe(false);
+    });
+
+    it("blocks IPv6-mapped IPv4 loopback (compressed hex form)", async () => {
+      expect(await isAllowedUri("https://[::ffff:7f00:1]/card.json")).toBe(false);
     });
   });
 });
