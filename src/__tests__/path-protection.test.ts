@@ -10,6 +10,7 @@
  */
 
 import { describe, it, expect } from "vitest";
+import fs from "fs";
 import path from "path";
 import { isProtectedFile } from "../self-mod/code.js";
 import { createPathProtectionRules } from "../agent/policy-rules/path-protection.js";
@@ -89,6 +90,44 @@ describe("isProtectedFile", () => {
     expect(isProtectedFile("/some/path/agent/policy-engine.js")).toBe(true);
     expect(isProtectedFile("/some/path/agent/policy-rules/index.ts")).toBe(true);
     expect(isProtectedFile("/some/path/agent/policy-rules/index.js")).toBe(true);
+  });
+
+  it("protects EVERY policy-rules module, not just index", () => {
+    // PROTECTED_FILES enumerated only `agent/policy-rules/index.{ts,js}`. The
+    // other six modules in that directory were therefore writable by
+    // edit_own_file, i.e. the agent could rewrite the rules that police it.
+    //
+    // Driven off the real directory listing rather than a hardcoded list, so
+    // a module added later is covered automatically - the failure mode here
+    // was precisely someone forgetting to enumerate one.
+    const rulesDir = path.join(process.cwd(), "src", "agent", "policy-rules");
+    const modules = fs
+      .readdirSync(rulesDir)
+      .map((f) => f.replace(/\.(ts|js)$/, ""))
+      .filter((f, i, arr) => arr.indexOf(f) === i);
+
+    expect(modules.length).toBeGreaterThan(1);
+    expect(modules).toContain("index");
+    expect(modules).toContain("authority");
+
+    for (const mod of modules) {
+      expect(isProtectedFile(`/some/path/agent/policy-rules/${mod}.ts`)).toBe(true);
+      expect(isProtectedFile(`/some/path/agent/policy-rules/${mod}.js`)).toBe(true);
+    }
+  });
+
+  it("protects policy-rules at any depth or install location", () => {
+    expect(isProtectedFile("/app/dist/agent/policy-rules/authority.ts")).toBe(true);
+    expect(isProtectedFile("/home/user/.automaton/src/agent/policy-rules/financial.ts")).toBe(true);
+    expect(isProtectedFile("agent/policy-rules/validation.ts")).toBe(true);
+  });
+
+  it("does NOT block a similarly-named directory", () => {
+    // Segment matching must stay exact: a directory merely ending in
+    // "policy-rules" is a different thing and should not be swept up.
+    expect(isProtectedFile("/some/path/my-policy-rules/foo.ts")).toBe(false);
+    expect(isProtectedFile("/some/path/policy-rules-extra/foo.ts")).toBe(false);
+    expect(isProtectedFile("/some/path/notpolicy-rules.ts")).toBe(false);
   });
 
   it("does NOT false-positive on substring matches", () => {

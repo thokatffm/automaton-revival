@@ -96,6 +96,13 @@ const BLOCKED_DIRECTORY_PATTERNS: readonly string[] = Object.freeze([
   "/etc/shadow",
   "/proc",
   "/sys",
+  // The policy-rule modules are the agent's own guardrails. Blocking the whole
+  // directory, rather than listing each file in PROTECTED_FILES, means a
+  // module added later is protected by default instead of becoming writable
+  // the first time someone forgets to enumerate it. Matching is by path
+  // segment, so `policy-rules/` cannot false-positive on a similarly-named
+  // directory elsewhere.
+  "policy-rules",
 ]);
 
 /**
