@@ -175,6 +175,33 @@ describe("failed inference calls are billed", () => {
     expect(costs[0].inputTokens).toBe(1000);
     expect(costs[0].outputTokens).toBe(500);
   });
+
+  it("surfaces the upstream error even if recording the cost fails", async () => {
+    // A DB failure while logging the cost must not replace the real error the
+    // caller needs to diagnose.
+    const registry = new ModelRegistry(db);
+    registry.initialize();
+    const budget = new InferenceBudgetTracker(db, DEFAULT_MODEL_STRATEGY_CONFIG);
+    // Force recordCost to throw, as a locked/corrupt DB would.
+    budget.recordCost = () => {
+      throw new Error("database is locked");
+    };
+    const router = new InferenceRouter(db, registry, budget);
+
+    await expect(
+      router.route(
+        {
+          messages: [{ role: "user", content: "a".repeat(1_000) }],
+          taskType: "agent_turn",
+          tier: "normal",
+          sessionId: "db-failure",
+        },
+        async () => {
+          throw new Error("502 Bad Gateway");
+        },
+      ),
+    ).rejects.toThrow("502 Bad Gateway");
+  });
 });
 
 describe("token cache does not retain payloads", () => {

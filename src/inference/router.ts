@@ -21,6 +21,10 @@ import type {
 import { ModelRegistry } from "./registry.js";
 import { InferenceBudgetTracker } from "./budget.js";
 import { DEFAULT_ROUTING_MATRIX, TASK_TIMEOUTS } from "./types.js";
+import { createLogger } from "../observability/logger.js";
+import type { InferenceCostRow } from "../types.js";
+
+const logger = createLogger("inference.router");
 
 type Database = BetterSqlite3.Database;
 
@@ -141,7 +145,7 @@ export class InferenceRouter {
           model,
           transformedMessages,
         );
-        this.budget.recordCost({
+        this.recordCostSafely({
           sessionId,
           turnId: turnId || null,
           model: model.modelId,
@@ -169,7 +173,7 @@ export class InferenceRouter {
       // consumed the prompt too. Record the same estimate before rethrowing,
       // so a retry storm cannot hide its cost.
       const estimated = this.estimateRequestCost(model, transformedMessages);
-      this.budget.recordCost({
+      this.recordCostSafely({
         sessionId,
         turnId: turnId || null,
         model: model.modelId,
@@ -368,6 +372,24 @@ export class InferenceRouter {
 
   private getPreference(tier: SurvivalTier, taskType: InferenceTaskType): ModelPreference | undefined {
     return DEFAULT_ROUTING_MATRIX[tier]?.[taskType];
+  }
+
+  /**
+   * Record a cost row without ever throwing.
+   *
+   * This is called from the error path of `route`, where a DB failure while
+   * logging the cost would replace the real upstream error (timeout / 5xx)
+   * with an unrelated "database is locked", destroying the diagnostic the
+   * caller needs. Losing a cost row is strictly better than losing the error.
+   */
+  private recordCostSafely(entry: Omit<InferenceCostRow, "id" | "createdAt">): void {
+    try {
+      this.budget.recordCost(entry);
+    } catch (error) {
+      logger.warn("Failed to record inference cost", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   /**
