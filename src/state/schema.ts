@@ -676,27 +676,29 @@ export const MIGRATION_V11 = `
  * ISO-8601 value and reformats it, preserving the instant (both are UTC).
  *
  * The `LIKE '%T%'` guard makes every statement idempotent and keeps this a
- * no-op once the writers emit native timestamps. Each UPDATE is independent,
- * so a database that is missing one of these tables still gets the others
- * repaired (the runner tolerates a failure on a partially-created database).
+ * no-op once the writers emit native timestamps.
+ *
+ * These are kept as SEPARATE statements and executed individually, not as one
+ * multi-statement script. `db.exec()` aborts a script at the first error, so a
+ * single script would mean that whichever table is missing silently skips
+ * every statement after it — measured: with `heartbeat_schedule` absent, the
+ * other three tables were left un-repaired. Running them one at a time means a
+ * database that is missing one of these tables still gets the rest repaired.
  */
-export const MIGRATION_V12_NORMALISE_EXPIRY_TIMESTAMPS = `
-  UPDATE heartbeat_schedule
-     SET lease_expires_at = strftime('%Y-%m-%d %H:%M:%S', lease_expires_at)
-   WHERE lease_expires_at LIKE '%T%';
-
-  UPDATE heartbeat_dedup
-     SET expires_at = strftime('%Y-%m-%d %H:%M:%S', expires_at)
-   WHERE expires_at LIKE '%T%';
-
-  UPDATE working_memory
-     SET expires_at = strftime('%Y-%m-%d %H:%M:%S', expires_at)
-   WHERE expires_at LIKE '%T%';
-
-  UPDATE discovered_agents_cache
-     SET valid_until = strftime('%Y-%m-%d %H:%M:%S', valid_until)
-   WHERE valid_until LIKE '%T%';
-`;
+export const MIGRATION_V12_EXPIRY_TIMESTAMP_STATEMENTS: readonly string[] = [
+  `UPDATE heartbeat_schedule
+      SET lease_expires_at = strftime('%Y-%m-%d %H:%M:%S', lease_expires_at)
+    WHERE lease_expires_at LIKE '%T%'`,
+  `UPDATE heartbeat_dedup
+      SET expires_at = strftime('%Y-%m-%d %H:%M:%S', expires_at)
+    WHERE expires_at LIKE '%T%'`,
+  `UPDATE working_memory
+      SET expires_at = strftime('%Y-%m-%d %H:%M:%S', expires_at)
+    WHERE expires_at LIKE '%T%'`,
+  `UPDATE discovered_agents_cache
+      SET valid_until = strftime('%Y-%m-%d %H:%M:%S', valid_until)
+    WHERE valid_until LIKE '%T%'`,
+] as const;
 
 export const MIGRATION_V10 = `
   -- Schema version: 10

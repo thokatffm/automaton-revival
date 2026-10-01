@@ -64,7 +64,7 @@ import {
   MIGRATION_V9_ALTER_CHILDREN_ROLE,
   MIGRATION_V10,
   MIGRATION_V11,
-  MIGRATION_V12_NORMALISE_EXPIRY_TIMESTAMPS,
+  MIGRATION_V12_EXPIRY_TIMESTAMP_STATEMENTS,
 } from "./schema.js";
 import type {
   RiskLevel,
@@ -647,15 +647,24 @@ function applyMigrations(db: DatabaseType): void {
     {
       version: 12,
       apply: () => {
-        // Data-only normalisation: rewrites existing expiry timestamps in
-        // place. Tolerates a partially-created older database where one of
-        // these tables is absent, so the remaining tables are still repaired.
-        try {
-          db.exec(MIGRATION_V12_NORMALISE_EXPIRY_TIMESTAMPS);
-        } catch (error) {
-          logger.warn("Expiry timestamp normalisation skipped", {
-            error: error instanceof Error ? error.message : String(error),
-          });
+        // Run each statement separately: db.exec() aborts a multi-statement
+        // script at the first error, so one absent table would otherwise skip
+        // every statement after it and silently leave the rest un-repaired.
+        for (const stmt of MIGRATION_V12_EXPIRY_TIMESTAMP_STATEMENTS) {
+          try {
+            db.exec(stmt);
+          } catch (error) {
+            // e.g. the table does not exist in a partially-created database.
+            // The remaining tables are still repaired, which is the reason for
+            // executing these individually rather than as one script. The
+            // version stamp is still recorded, so a table that is genuinely
+            // missing is not revisited later - that is acceptable because
+            // CREATE_TABLES has already created every one of these tables
+            // before migrations run, so this branch is defensive only.
+            logger.warn("Expiry timestamp normalisation statement skipped", {
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
         }
       },
     },

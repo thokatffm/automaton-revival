@@ -17,6 +17,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import fs from "fs";
 import path from "path";
 import os from "os";
+import Database from "better-sqlite3";
 import { createDatabase } from "../state/database.js";
 import {
   acquireTaskLease,
@@ -28,7 +29,7 @@ import {
   wmClearExpired,
   toSqliteUtcTimestamp,
 } from "../state/database.js";
-import { MIGRATION_V12_NORMALISE_EXPIRY_TIMESTAMPS } from "../state/schema.js";
+import { MIGRATION_V12_EXPIRY_TIMESTAMP_STATEMENTS } from "../state/schema.js";
 
 let tmpDir: string;
 let dbPath: string;
@@ -359,15 +360,65 @@ describe("expiry timestamp format", () => {
         )
         .run("k1", "task", toSqliteUtcTimestamp(Date.now() + 60_000));
 
-      // Run the normalisation SQL a second time; it must not corrupt the row.
-      db.raw.exec(MIGRATION_V12_NORMALISE_EXPIRY_TIMESTAMPS);
-      db.raw.exec(MIGRATION_V12_NORMALISE_EXPIRY_TIMESTAMPS);
+      // Run the normalisation statements a second time; must not corrupt rows.
+      for (const stmt of MIGRATION_V12_EXPIRY_TIMESTAMP_STATEMENTS) {
+        db.raw.exec(stmt);
+        db.raw.exec(stmt);
+      }
 
       const row = db.raw
         .prepare("SELECT expires_at FROM heartbeat_dedup WHERE dedup_key = ?")
         .get("k1") as { expires_at: string };
       expect(row.expires_at).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
       expect(isDeduplicated(db.raw, "k1")).toBe(true);
+    });
+
+    it("repairs the other tables when one table is missing", () => {
+      // db.exec() aborts a multi-statement script at the first error, so
+      // running the four UPDATEs as one script means an absent FIRST table
+      // silently skips the rest. Executing them individually must not.
+      const partial = new Database(":memory:");
+      // heartbeat_schedule and discovered_agents_cache are deliberately
+      // absent - one is first in the list, the other last, so this covers
+      // both the skip-forward and the already-run ends.
+      partial.exec(
+        "CREATE TABLE heartbeat_dedup (dedup_key TEXT PRIMARY KEY, task_name TEXT, expires_at TEXT)",
+      );
+      partial.exec("CREATE TABLE working_memory (id TEXT PRIMARY KEY, expires_at TEXT)");
+      partial.prepare(
+        "INSERT INTO heartbeat_dedup VALUES (?,?,?)",
+      ).run("k", "t", new Date(Date.now() - 60_000).toISOString());
+      partial.prepare("INSERT INTO working_memory VALUES (?,?)").run(
+        "w",
+        new Date(Date.now() - 60_000).toISOString(),
+      );
+
+      const failures: string[] = [];
+      for (const stmt of MIGRATION_V12_EXPIRY_TIMESTAMP_STATEMENTS) {
+        try {
+          partial.exec(stmt);
+        } catch (e) {
+          failures.push(e instanceof Error ? e.message : String(e));
+        }
+      }
+
+      // Exactly the two absent tables are reported...
+      expect(failures.length).toBe(2);
+      expect(failures.join(" ")).toContain("heartbeat_schedule");
+      expect(failures.join(" ")).toContain("discovered_agents_cache");
+
+      // ...and the two present tables were still repaired. Under the old
+      // single-script form, heartbeat_schedule's absence aborted the run and
+      // left both of these as raw ISO text.
+      const remaining = partial
+        .prepare(
+          `SELECT
+             (SELECT COUNT(*) FROM heartbeat_dedup WHERE expires_at LIKE '%T%')
+           + (SELECT COUNT(*) FROM working_memory  WHERE expires_at LIKE '%T%') AS c`,
+        )
+        .get() as { c: number };
+      expect(remaining.c).toBe(0);
+      partial.close();
     });
   });
 });
