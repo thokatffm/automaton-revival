@@ -127,19 +127,61 @@ export class InferenceRouter {
       }
     } catch (error: any) {
       const latencyMs = Date.now() - startTime;
-      // If fallback is enabled, try next candidate
+      // A call that reached the provider still consumed budget, even when it
+      // failed. Record it so the ledger reflects real spend; otherwise a run
+      // of timeouts/upstream-5xx is invisible to the budget tracker and the
+      // session under-reports its own cost.
+      //
+      // On a timeout we have no usage object, so estimate from the request we
+      // did send. This under-counts versus a real completion, which is the
+      // safe direction for a budget guard: it errs toward letting the caller
+      // continue rather than over-penalising a legitimate retry.
       if (error.name === "AbortError") {
+        const estimated = this.estimateRequestCost(
+          model,
+          transformedMessages,
+        );
+        this.budget.recordCost({
+          sessionId,
+          turnId: turnId || null,
+          model: model.modelId,
+          provider: model.provider,
+          inputTokens: estimated.inputTokens,
+          outputTokens: 0,
+          costCents: estimated.costCents,
+          latencyMs,
+          tier,
+          taskType,
+          cacheHit: false,
+        });
         return {
           content: `Inference timeout after ${timeout}ms`,
           model: model.modelId,
           provider: model.provider,
-          inputTokens: 0,
+          inputTokens: estimated.inputTokens,
           outputTokens: 0,
-          costCents: 0,
+          costCents: estimated.costCents,
           latencyMs,
           finishReason: "timeout",
         };
       }
+      // Non-timeout failures (upstream 5xx, connection reset, provider error)
+      // consumed the prompt too. Record the same estimate before rethrowing,
+      // so a retry storm cannot hide its cost.
+      const estimated = this.estimateRequestCost(model, transformedMessages);
+      this.budget.recordCost({
+        sessionId,
+        turnId: turnId || null,
+        model: model.modelId,
+        provider: model.provider,
+        inputTokens: estimated.inputTokens,
+        outputTokens: 0,
+        costCents: estimated.costCents,
+        latencyMs,
+        tier,
+        taskType,
+        cacheHit: false,
+      });
       throw error;
     }
     const latencyMs = Date.now() - startTime;
@@ -326,5 +368,30 @@ export class InferenceRouter {
 
   private getPreference(tier: SurvivalTier, taskType: InferenceTaskType): ModelPreference | undefined {
     return DEFAULT_ROUTING_MATRIX[tier]?.[taskType];
+  }
+
+  /**
+   * Estimate the input cost of a request that was sent but produced no usage
+   * object (timeout, upstream 5xx, connection reset).
+   *
+   * Deliberately a character-based estimate rather than the BPE tokenizer:
+   * this runs on the error path, where a large payload must not add another
+   * expensive synchronous call on top of the failure. It also matches the
+   * fallback the tokenizer itself uses when unavailable.
+   *
+   * Output tokens are unknowable on this path and are reported as 0, so this
+   * is a floor on the real cost rather than an over-count.
+   */
+  private estimateRequestCost(
+    model: ModelEntry,
+    messages: ChatMessage[],
+  ): { inputTokens: number; costCents: number } {
+    let chars = 0;
+    for (const msg of messages) {
+      chars += (msg.content ?? "").length;
+    }
+    const inputTokens = Math.ceil(chars / 4);
+    const costCents = Math.ceil((inputTokens / 1000) * model.costPer1kInput / 100);
+    return { inputTokens, costCents };
   }
 }

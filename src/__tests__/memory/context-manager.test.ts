@@ -80,12 +80,36 @@ describe("createTokenCounter", () => {
   it("LRU behavior evicts oldest keys first", () => {
     const counter = createTokenCounter();
 
+    // Reference the keys as they are created so eviction can be asserted
+    // without depending on the key format (formatCacheKey now emits a digest,
+    // not the raw text).
+    const firstKeys: string[] = [];
     for (let i = 0; i < 10_005; i += 1) {
       counter.countTokens(`evict-${i}`);
+      firstKeys.push([...counter.cache.keys()][counter.cache.size - 1]);
     }
 
-    expect(counter.cache.has("default::evict-0")).toBe(false);
-    expect(counter.cache.has("default::evict-10004")).toBe(true);
+    expect(counter.cache.size).toBeLessThanOrEqual(10_000);
+    // The oldest inserted key must have been evicted.
+    expect(counter.cache.has(firstKeys[0])).toBe(false);
+    // The most recent must still be present (an LRU, not a clear-all).
+    expect(counter.cache.has(firstKeys[firstKeys.length - 1])).toBe(true);
+  });
+
+  it("keys are digests that do not embed the payload", () => {
+    const counter = createTokenCounter();
+    counter.countTokens("UNIQUEPAYLOADMARKER-payload");
+
+    for (const key of counter.cache.keys()) {
+      expect(key).not.toContain("UNIQUEPAYLOADMARKER");
+      expect(key.length).toBeLessThan(128);
+    }
+  });
+
+  it("returns an identical count for the same text on a cache hit", () => {
+    const counter = createTokenCounter();
+    const text = "the same text twice";
+    expect(counter.countTokens(text)).toBe(counter.countTokens(text));
   });
 });
 
