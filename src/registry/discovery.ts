@@ -182,8 +182,13 @@ function getCachedCard(
     ).get(agentAddress) as { agent_card: string; valid_until: string | null } | undefined;
     if (!row) return null;
 
-    // Check if cache is still valid
-    if (row.valid_until && new Date(row.valid_until).getTime() < Date.now()) {
+    // Check if cache is still valid.
+    //
+    // valid_until is stored in SQLite-native UTC format ("YYYY-MM-DD HH:MM:SS").
+    // `new Date(string)` treats that space-separated form as LOCAL time, which
+    // is wrong by the machine's UTC offset (a 5.5h skew in IST). Append the 'Z'
+    // so the value is unambiguously parsed as UTC.
+    if (row.valid_until && new Date(`${row.valid_until.replace(" ", "T")}Z`).getTime() < Date.now()) {
       return null; // Expired
     }
 

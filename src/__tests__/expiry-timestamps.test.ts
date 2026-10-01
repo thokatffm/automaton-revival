@@ -373,6 +373,35 @@ describe("expiry timestamp format", () => {
       expect(isDeduplicated(db.raw, "k1")).toBe(true);
     });
 
+    it("does not convert an unparseable expiry to NULL", () => {
+      // strftime() returns NULL for a value it cannot parse, and NULL compares
+      // false against every expiry test - so an unparseable row would become a
+      // permanently-never-expiring lease or nonce. The IS NOT NULL guard leaves
+      // it untouched and visible instead.
+      const db = new Database(":memory:");
+      db.exec(
+        "CREATE TABLE heartbeat_dedup (dedup_key TEXT PRIMARY KEY, task_name TEXT, expires_at TEXT)",
+      );
+      const garbage = "2026-13-45T99:99:99Z";
+      db.prepare("INSERT INTO heartbeat_dedup VALUES (?,?,?)").run("bad", "t", garbage);
+
+      for (const stmt of MIGRATION_V12_EXPIRY_TIMESTAMP_STATEMENTS) {
+        try {
+          db.exec(stmt);
+        } catch {
+          /* other tables absent in this fixture */
+        }
+      }
+
+      const row = db.prepare("SELECT expires_at FROM heartbeat_dedup WHERE dedup_key = ?").get("bad") as {
+        expires_at: string | null;
+      };
+      // Left as-is rather than nulled, so it stays diagnosable.
+      expect(row.expires_at).toBe(garbage);
+      expect(row.expires_at).not.toBeNull();
+      db.close();
+    });
+
     it("repairs the other tables when one table is missing", () => {
       // db.exec() aborts a multi-statement script at the first error, so
       // running the four UPDATEs as one script means an absent FIRST table

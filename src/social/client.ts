@@ -15,6 +15,7 @@ import { ResilientHttpClient } from "../conway/http-client.js";
 import { signSendPayload, signPollPayload, MESSAGE_LIMITS } from "./signing.js";
 import { validateRelayUrl, validateMessage } from "./validation.js";
 import { createLogger } from "../observability/logger.js";
+import { toSqliteUtcTimestamp } from "../state/database.js";
 const logger = createLogger("social");
 
 // Request timeout for all fetch calls (30 seconds)
@@ -63,8 +64,13 @@ export function createSocialClient(
         .get(`social:nonce:${nonce}`);
       if (row) return true; // Already seen this nonce
 
-      // Insert nonce with 5 min TTL
-      const expiresAt = new Date(Date.now() + MESSAGE_LIMITS.replayWindowMs).toISOString();
+      // Insert nonce with 5 min TTL.
+      // MUST use the SQLite-native format: heartbeat_dedup.expires_at is
+      // compared lexicographically against datetime('now'), so an ISO value
+      // ("...T...Z") sorts after the space-separated form and never compares as
+      // expired. Writing ISO here while the state layer writes native left the
+      // table with mixed formats, where a live nonce read back as absent.
+      const expiresAt = toSqliteUtcTimestamp(Date.now() + MESSAGE_LIMITS.replayWindowMs);
       db.prepare(
         "INSERT OR IGNORE INTO heartbeat_dedup (dedup_key, task_name, expires_at) VALUES (?, ?, ?)",
       ).run(`social:nonce:${nonce}`, "social_replay", expiresAt);

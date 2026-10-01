@@ -654,13 +654,16 @@ function applyMigrations(db: DatabaseType): void {
           try {
             db.exec(stmt);
           } catch (error) {
-            // e.g. the table does not exist in a partially-created database.
-            // The remaining tables are still repaired, which is the reason for
-            // executing these individually rather than as one script. The
-            // version stamp is still recorded, so a table that is genuinely
-            // missing is not revisited later - that is acceptable because
-            // CREATE_TABLES has already created every one of these tables
-            // before migrations run, so this branch is defensive only.
+            // The table does not exist. In practice this is unreachable: the
+            // four target tables are created by MIGRATION_V4/V5/V7, all of
+            // which run before V12, so by the time this executes they all
+            // exist. The branch is defensive only.
+            //
+            // The version stamp is recorded regardless, so a genuinely missing
+            // table would not be revisited. That is a deliberate trade: this is
+            // a data normalisation, not a schema change, and failing startup
+            // because one row's timestamp is unreadable would be worse for an
+            // agent than leaving that row for a human to inspect.
             logger.warn("Expiry timestamp normalisation statement skipped", {
               error: error instanceof Error ? error.message : String(error),
             });

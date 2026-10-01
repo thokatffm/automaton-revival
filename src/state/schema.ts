@@ -684,20 +684,30 @@ export const MIGRATION_V11 = `
  * every statement after it — measured: with `heartbeat_schedule` absent, the
  * other three tables were left un-repaired. Running them one at a time means a
  * database that is missing one of these tables still gets the rest repaired.
+ *
+ * The `IS NOT NULL` guard matters: `strftime()` returns NULL for a value it
+ * cannot parse, and a NULL expiry compares false against every `<` / `>=` test,
+ * so an unparseable row would become permanently-never-expiring. The guard
+ * leaves such a row untouched and visible for diagnosis instead of silently
+ * converting it into an immortal lease or a nonce that never clears.
  */
 export const MIGRATION_V12_EXPIRY_TIMESTAMP_STATEMENTS: readonly string[] = [
   `UPDATE heartbeat_schedule
       SET lease_expires_at = strftime('%Y-%m-%d %H:%M:%S', lease_expires_at)
-    WHERE lease_expires_at LIKE '%T%'`,
+    WHERE lease_expires_at LIKE '%T%'
+      AND strftime('%Y-%m-%d %H:%M:%S', lease_expires_at) IS NOT NULL`,
   `UPDATE heartbeat_dedup
       SET expires_at = strftime('%Y-%m-%d %H:%M:%S', expires_at)
-    WHERE expires_at LIKE '%T%'`,
+    WHERE expires_at LIKE '%T%'
+      AND strftime('%Y-%m-%d %H:%M:%S', expires_at) IS NOT NULL`,
   `UPDATE working_memory
       SET expires_at = strftime('%Y-%m-%d %H:%M:%S', expires_at)
-    WHERE expires_at LIKE '%T%'`,
+    WHERE expires_at LIKE '%T%'
+      AND strftime('%Y-%m-%d %H:%M:%S', expires_at) IS NOT NULL`,
   `UPDATE discovered_agents_cache
       SET valid_until = strftime('%Y-%m-%d %H:%M:%S', valid_until)
-    WHERE valid_until LIKE '%T%'`,
+    WHERE valid_until LIKE '%T%'
+      AND strftime('%Y-%m-%d %H:%M:%S', valid_until) IS NOT NULL`,
 ] as const;
 
 export const MIGRATION_V10 = `
