@@ -41,16 +41,38 @@ export async function initStateRepo(
   // Initialize
   await gitInit(conway, dir);
 
-  // Create .gitignore for sensitive files
+  // Create .gitignore for sensitive files.
+  //
+  // The list must name the files this codebase actually writes, not files we
+  // assume exist. In particular the runtime config is `automaton.json`
+  // (src/config.ts CONFIG_FILENAME) and it holds `conwayApiKey` plus any
+  // provider keys. `config.json` is a *different*, much smaller file written
+  // only by identity/provision.ts, so listing it alone left the real secrets
+  // tracked and eligible for the genesis commit.
+  //
+  // `inference-providers.json` lives at ~/.automaton/ and carries BYOK keys,
+  // so it is listed for the same reason.
+  //
+  // Deliberately an explicit list rather than `*.json`: the state repo exists
+  // to version an agent's evolution (SOUL.md, WORKLOG.md, skills, heartbeat
+  // config, and non-secret JSON like genesis.json), so a blanket ignore would
+  // silently drop legitimate state and make commits appear to be no-ops.
   const gitignore = `# Sensitive files - never commit
 wallet.json
 config.json
+automaton.json
+inference-providers.json
 state.db
 state.db-wal
 state.db-shm
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
 logs/
 *.log
 *.err
+.env
 `;
 
   await conway.writeFile(`${dir}/.gitignore`, gitignore);
