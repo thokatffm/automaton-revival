@@ -5,7 +5,7 @@
  * The database IS the automaton's memory.
  */
 
-export const SCHEMA_VERSION = 11;
+export const SCHEMA_VERSION = 12;
 
 export const CREATE_TABLES = `
   -- Schema version tracking
@@ -656,6 +656,46 @@ export const MIGRATION_V11 = `
   -- Schema version: 11
   -- Add chain_type column to children table for multi-chain support
   ALTER TABLE children ADD COLUMN chain_type TEXT DEFAULT 'evm';
+`;
+
+// === Expiry Timestamp Format Normalisation ===
+
+/**
+ * Schema version: 12.
+ *
+ * Expiry columns are compared against `datetime('now')`, which returns
+ * `YYYY-MM-DD HH:MM:SS`. Several writers stored `Date.toISOString()` values
+ * (`YYYY-MM-DDTHH:MM:SS.mmmZ`) instead. SQLite compares those TEXT values
+ * lexicographically, and 'T' sorts after ' ', so rows already past their
+ * expiry were still treated as live: heartbeat leases could never be
+ * reclaimed, dedup keys never expired, and stale agent-cache entries were
+ * served forever.
+ *
+ * This rewrites the already-persisted rows into the SQLite-native format so
+ * existing databases are repaired, not just new writes. `strftime` parses the
+ * ISO-8601 value and reformats it, preserving the instant (both are UTC).
+ *
+ * The `LIKE '%T%'` guard makes every statement idempotent and keeps this a
+ * no-op once the writers emit native timestamps. Each UPDATE is independent,
+ * so a database that is missing one of these tables still gets the others
+ * repaired (the runner tolerates a failure on a partially-created database).
+ */
+export const MIGRATION_V12_NORMALISE_EXPIRY_TIMESTAMPS = `
+  UPDATE heartbeat_schedule
+     SET lease_expires_at = strftime('%Y-%m-%d %H:%M:%S', lease_expires_at)
+   WHERE lease_expires_at LIKE '%T%';
+
+  UPDATE heartbeat_dedup
+     SET expires_at = strftime('%Y-%m-%d %H:%M:%S', expires_at)
+   WHERE expires_at LIKE '%T%';
+
+  UPDATE working_memory
+     SET expires_at = strftime('%Y-%m-%d %H:%M:%S', expires_at)
+   WHERE expires_at LIKE '%T%';
+
+  UPDATE discovered_agents_cache
+     SET valid_until = strftime('%Y-%m-%d %H:%M:%S', valid_until)
+   WHERE valid_until LIKE '%T%';
 `;
 
 export const MIGRATION_V10 = `

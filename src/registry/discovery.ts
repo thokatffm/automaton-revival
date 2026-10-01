@@ -16,6 +16,7 @@ import type {
 import { DEFAULT_DISCOVERY_CONFIG } from "../types.js";
 import { queryAgent, getTotalAgents, getRegisteredAgentsByEvents } from "./erc8004.js";
 import { keccak256, toBytes } from "viem";
+import { toSqliteUtcTimestamp } from "../state/database.js";
 import { createLogger } from "../observability/logger.js";
 import { lookup as dnsLookup } from "node:dns/promises";
 const logger = createLogger("registry.discovery");
@@ -205,7 +206,9 @@ function setCachedCard(
   if (!db) return;
   try {
     const now = new Date().toISOString();
-    const validUntil = new Date(Date.now() + ttlMs).toISOString();
+    // valid_until is compared against datetime('now') by agentCacheGetValid /
+    // agentCachePrune, so it must use the same SQLite-native UTC format.
+    const validUntil = toSqliteUtcTimestamp(Date.now() + ttlMs);
     const cardJson = JSON.stringify(card);
     const cardHash = keccak256(toBytes(cardJson));
 
