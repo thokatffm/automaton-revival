@@ -35,7 +35,7 @@ import {
   executeTool,
 } from "./tools.js";
 import { sanitizeInput } from "./injection-defense.js";
-import { getSurvivalTier } from "../conway/credits.js";
+import { getSurvivalTier, resolveSurvivalTier, BALANCE_UNKNOWN } from "../conway/credits.js";
 import { getUsdcBalance } from "../conway/x402.js";
 import {
   claimInboxMessages,
@@ -431,7 +431,7 @@ export async function runAgentLoop(
       // Check survival tier
       // api_unreachable: creditsCents === -1 means API failed with no cache.
       // Do NOT kill the agent; continue in low-compute mode and retry next tick.
-      if (financial.creditsCents === -1) {
+      if (financial.creditsCents === BALANCE_UNKNOWN) {
         log(config, "[API_UNREACHABLE] Balance API unreachable, continuing in low-compute mode.");
         inference.setLowComputeMode(true);
       } else {
@@ -596,7 +596,7 @@ export async function runAgentLoop(
       pendingInput = undefined;
 
       // ── Inference Call (via router when available) ──
-      const survivalTier = getSurvivalTier(financial.creditsCents);
+      const survivalTier = resolveSurvivalTier(financial.creditsCents);
       log(config, `[THINK] Routing inference (tier: ${survivalTier}, model: ${inference.getDefaultModel()})...`);
 
       const inferenceTools = toolsToInferenceFormat(tools);
@@ -977,7 +977,7 @@ async function getFinancialState(
     // No cache available -- return conservative non-zero sentinel
     logger.error("Balance API failed, no cache available");
     return {
-      creditsCents: -1,
+      creditsCents: BALANCE_UNKNOWN,
       usdcBalance: -1,
       lastChecked: new Date().toISOString(),
     };

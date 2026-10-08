@@ -44,6 +44,25 @@ export function getSurvivalTier(creditsCents: number): SurvivalTier {
 }
 
 /**
+ * Sentinel used when the balance API is unreachable and no cached balance
+ * exists. It is deliberately NOT a real balance: "unknown" must never be
+ * read as the API-confirmed debt that getSurvivalTier() treats as "dead".
+ */
+export const BALANCE_UNKNOWN = -1;
+
+/**
+ * Map a possibly-unknown balance to a survival tier.
+ *
+ * When the balance is unknown the automaton degrades to "low_compute"
+ * instead of dying: an unreachable billing API is an infrastructure
+ * failure, not evidence that the agent is out of money. Retried next tick.
+ */
+export function resolveSurvivalTier(creditsCents: number): SurvivalTier {
+  if (creditsCents === BALANCE_UNKNOWN) return "low_compute";
+  return getSurvivalTier(creditsCents);
+}
+
+/**
  * Format a credit amount for display.
  */
 export function formatCredits(cents: number): string {
