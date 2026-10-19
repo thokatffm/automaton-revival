@@ -67,6 +67,37 @@ describe("estimateTokens", () => {
   it("handles empty string as zero tokens", () => {
     expect(estimateTokens("")).toBe(0);
   });
+
+  // Regression: tiktoken's BPE is O(n^2) in the length of a single
+  // whitespace-free run. Untrusted content (tool results, fetched pages,
+  // inbox messages) containing a long unbroken blob used to stall the
+  // agent loop for minutes — 16K repeated chars took ~12s, base64 of a
+  // zero-filled buffer ~23s for 21K chars.
+  it("stays fast on long whitespace-free blobs", () => {
+    const cases = [
+      "a".repeat(64_000),
+      Buffer.alloc(48_000).toString("base64"), // "AAAA..." — real artifact shape
+      "0".repeat(64_000),
+    ];
+    for (const blob of cases) {
+      const started = Date.now();
+      const tokens = estimateTokens(blob);
+      const elapsed = Date.now() - started;
+      expect(elapsed).toBeLessThan(1_000);
+      // Must not under-budget: the character heuristic is the floor.
+      expect(tokens).toBeGreaterThanOrEqual(Math.ceil(blob.length / 4));
+    }
+  });
+
+  it("stays accurate and fast on large natural text", () => {
+    const prose = "lorem ipsum dolor sit amet ".repeat(4_000);
+    const started = Date.now();
+    const tokens = estimateTokens(prose);
+    expect(Date.now() - started).toBeLessThan(1_000);
+    // Real tokenization of prose beats the crude length/4 guess.
+    expect(tokens).toBeGreaterThan(0);
+    expect(tokens).toBeGreaterThanOrEqual(Math.ceil(prose.length / 4));
+  });
 });
 
 // ─── truncateToolResult ────────────────────────────────────────

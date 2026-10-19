@@ -30,6 +30,45 @@ export type { TokenBudget };
 export { DEFAULT_TOKEN_BUDGET };
 
 /**
+ * Longest whitespace-free run we are willing to hand to the BPE tokenizer.
+ *
+ * tiktoken's BPE is O(n^2) in the length of a single whitespace-free chunk.
+ * Natural prose is unaffected (256KB measures in ~16ms), but one long
+ * unbroken low-entropy run is pathological: 16K repeated characters takes
+ * ~12s, and base64 of a zero-filled buffer (`AAAA...`) ~23s for 21K chars.
+ * Because this runs on untrusted content — tool results, fetched pages,
+ * inbox messages — an attacker-supplied blob would otherwise stall the
+ * single-threaded agent loop for minutes.
+ *
+ * Falling back to the character heuristic for such content never
+ * under-budgets: BPE compresses repetitive runs far below length/4, so the
+ * heuristic over-estimates exactly the inputs this guard catches.
+ */
+const MAX_TOKENIZER_RUN = 1_000;
+
+/** Cap on total characters tokenized exactly; the remainder is extrapolated. */
+const MAX_TOKENIZER_CHARS = 100_000;
+
+/** Length of the longest run of non-whitespace characters. Single O(n) pass. */
+function longestUnbrokenRun(content: string): number {
+  let longest = 0;
+  let current = 0;
+  for (let i = 0; i < content.length; i++) {
+    const code = content.charCodeAt(i);
+    // space, tab, LF, CR, VT, FF
+    const isSpace =
+      code === 32 || (code >= 9 && code <= 13);
+    if (isSpace) {
+      current = 0;
+    } else if (++current > longest) {
+      longest = current;
+      if (longest > MAX_TOKENIZER_RUN) return longest; // early exit
+    }
+  }
+  return longest;
+}
+
+/**
  * Estimate token count from text length.
  * Conservative estimate: ~4 characters per token for English text.
  */
@@ -39,6 +78,22 @@ export function estimateTokens(text: string): number {
   try {
     if (!tokenCounter) {
       tokenCounter = createTokenCounter();
+    }
+    // Guard the quadratic path before touching the tokenizer.
+    if (longestUnbrokenRun(content) > MAX_TOKENIZER_RUN) {
+      return legacyEstimate;
+    }
+    if (content.length > MAX_TOKENIZER_CHARS) {
+      // Tokenize a bounded prefix and scale by the remaining length.
+      const prefix = content.slice(0, MAX_TOKENIZER_CHARS);
+      const prefixTokens = tokenCounter.countTokens(prefix);
+      if (Number.isFinite(prefixTokens) && prefixTokens > 0) {
+        const scaled = Math.ceil(
+          prefixTokens * (content.length / MAX_TOKENIZER_CHARS),
+        );
+        return Math.max(scaled, legacyEstimate);
+      }
+      return legacyEstimate;
     }
     const tokens = tokenCounter.countTokens(content);
     if (Number.isFinite(tokens) && tokens > 0) {
