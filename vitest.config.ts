@@ -5,6 +5,7 @@ export default defineConfig({
     testTimeout: 30_000,
     teardownTimeout: 5_000,
     include: ["src/__tests__/**/*.test.ts"],
+    setupFiles: ["src/__tests__/setup/isolate-home.ts"],
     coverage: {
       provider: "v8",
       include: ["src/**/*.ts"],
