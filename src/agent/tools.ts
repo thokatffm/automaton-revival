@@ -2858,8 +2858,14 @@ Model: ${ctx.inference.getDefaultModel()}
           maxPayment,
         );
 
+        const settlementLine = result.settlement
+          ? `\nSettlement: ${JSON.stringify(result.settlement)}`
+          : "";
+
         if (!result.success) {
-          return `x402 fetch failed: ${result.error || "Unknown error"}`;
+          const detail = result.error
+            || (result.status ? `HTTP ${result.status}: ${JSON.stringify(result.response ?? "").slice(0, 500)}` : "Unknown error");
+          return `x402 fetch failed: ${detail}${settlementLine}`;
         }
 
         const responseStr =
@@ -2869,9 +2875,9 @@ Model: ${ctx.inference.getDefaultModel()}
 
         // Truncate very large responses
         if (responseStr.length > 10000) {
-          return `x402 fetch succeeded (truncated):\n${responseStr.slice(0, 10000)}...`;
+          return `x402 fetch succeeded (truncated):${settlementLine}\n${responseStr.slice(0, 10000)}...`;
         }
-        return `x402 fetch succeeded:\n${responseStr}`;
+        return `x402 fetch succeeded:${settlementLine}\n${responseStr}`;
       },
     },
 

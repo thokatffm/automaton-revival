@@ -43,20 +43,28 @@ const BALANCE_OF_ABI = [
 interface PaymentRequirement {
   scheme: string;
   network: NetworkId;
+  /** Atomic amount (v2 `amount`) or the v1 `maxAmountRequired` string. */
   maxAmountRequired: string;
   payToAddress: Address;
   requiredDeadlineSeconds: number;
   usdcAddress: Address;
+  /** EIP-712 domain of the token, from `extra` (v2 requires it). */
+  domainName: string;
+  domainVersion: string;
+  /** The server's entry exactly as received; v2 echoes it as `accepted`. */
+  raw: Record<string, unknown>;
 }
 
 interface PaymentRequiredResponse {
   x402Version: number;
   accepts: PaymentRequirement[];
+  resource?: Record<string, unknown>;
 }
 
 interface ParsedPaymentRequirement {
   x402Version: number;
   requirement: PaymentRequirement;
+  resource?: Record<string, unknown>;
 }
 
 interface X402PaymentResult {
@@ -64,6 +72,8 @@ interface X402PaymentResult {
   response?: any;
   error?: string;
   status?: number;
+  /** Decoded PAYMENT-RESPONSE / X-PAYMENT-RESPONSE settlement, when sent. */
+  settlement?: unknown;
 }
 
 export interface UsdcBalanceResult {
@@ -112,11 +122,12 @@ function normalizePaymentRequirement(raw: unknown): PaymentRequirement | null {
   if (!network) return null;
 
   const scheme = typeof value.scheme === "string" ? value.scheme : null;
-  const maxAmountRequired = typeof value.maxAmountRequired === "string"
-    ? value.maxAmountRequired
-    : typeof value.maxAmountRequired === "number" &&
-        Number.isFinite(value.maxAmountRequired)
-      ? String(value.maxAmountRequired)
+  // v1 calls it maxAmountRequired, v2 calls it amount (atomic units).
+  const rawAmount = value.amount ?? value.maxAmountRequired;
+  const maxAmountRequired = typeof rawAmount === "string"
+    ? rawAmount
+    : typeof rawAmount === "number" && Number.isFinite(rawAmount)
+      ? String(rawAmount)
       : null;
   const payToAddress = typeof value.payToAddress === "string"
     ? value.payToAddress
@@ -137,6 +148,25 @@ function normalizePaymentRequirement(raw: unknown): PaymentRequirement | null {
     return null;
   }
 
+  // Only pay in the network's canonical USDC. The signature is bound to the
+  // asset contract and amounts are converted with USDC's 6 decimals, so an
+  // arbitrary server-chosen token would make the spending limits meaningless.
+  if (usdcAddress.toLowerCase() !== USDC_ADDRESSES[network].toLowerCase()) {
+    return null;
+  }
+
+  const extra = typeof value.extra === "object" && value.extra !== null
+    ? value.extra as Record<string, unknown>
+    : {};
+  // Skip payment flows this client does not implement (spec: clients must
+  // not construct a payment for an unrecognised paymentFlow).
+  if (typeof extra.paymentFlow === "string" && extra.paymentFlow !== "authorization") {
+    return null;
+  }
+  if (typeof extra.assetTransferMethod === "string" && extra.assetTransferMethod !== "eip3009") {
+    return null;
+  }
+
   return {
     scheme,
     network,
@@ -144,6 +174,9 @@ function normalizePaymentRequirement(raw: unknown): PaymentRequirement | null {
     payToAddress: payToAddress as Address,
     requiredDeadlineSeconds,
     usdcAddress: usdcAddress as Address,
+    domainName: typeof extra.name === "string" ? extra.name : "USD Coin",
+    domainVersion: typeof extra.version === "string" ? extra.version : "2",
+    raw: value,
   };
 }
 
@@ -158,7 +191,10 @@ function normalizePaymentRequired(raw: unknown): PaymentRequiredResponse | null 
   if (!accepts.length) return null;
 
   const x402Version = parsePositiveInt(value.x402Version) ?? 1;
-  return { x402Version, accepts };
+  const resource = typeof value.resource === "object" && value.resource !== null
+    ? value.resource as Record<string, unknown>
+    : undefined;
+  return { x402Version, accepts, resource };
 }
 
 function parseMaxAmountRequired(maxAmountRequired: string, x402Version: number): bigint {
@@ -375,6 +411,7 @@ export async function x402Fetch(
         account,
         parsed.requirement,
         parsed.x402Version,
+        parsed.resource,
       );
     } catch (err: any) {
       return {
@@ -389,60 +426,73 @@ export async function x402Fetch(
       JSON.stringify(payment),
     ).toString("base64");
 
+    // v2 renamed the header; v1 servers expect X-Payment.
+    const paymentHeaderName = parsed.x402Version >= 2 ? "PAYMENT-SIGNATURE" : "X-Payment";
+
     const paidResp = await x402HttpClient.request(url, {
       method,
       headers: {
         ...headers,
         "Content-Type": "application/json",
-        "X-Payment": paymentHeader,
+        [paymentHeaderName]: paymentHeader,
       },
       body,
       retries: 0, // Paid request: do not auto-retry (payment already signed)
     });
 
+    const settlement = decodeSettlementHeader(
+      paidResp.headers.get("PAYMENT-RESPONSE") ?? paidResp.headers.get("X-PAYMENT-RESPONSE"),
+    );
     const data = await paidResp.json().catch(() => paidResp.text());
-    return { success: paidResp.ok, response: data, status: paidResp.status };
+    return { success: paidResp.ok, response: data, status: paidResp.status, settlement };
   } catch (err: any) {
     return { success: false, error: err.message };
   }
 }
 
+/** Decode a base64-JSON settlement header; undefined when absent or unreadable. */
+function decodeSettlementHeader(header: string | null): unknown {
+  if (!header) return undefined;
+  try {
+    return safeJsonParse(Buffer.from(header, "base64").toString("utf-8")) ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function toParsed(value: PaymentRequiredResponse): ParsedPaymentRequirement {
+  return {
+    x402Version: value.x402Version,
+    requirement: selectRequirement(value),
+    resource: value.resource,
+  };
+}
+
 async function parsePaymentRequired(
   resp: Response,
 ): Promise<ParsedPaymentRequirement | null> {
-  const header = resp.headers.get("X-Payment-Required");
-  if (header) {
-    const rawHeader = safeJsonParse(header);
-    const normalizedRaw = normalizePaymentRequired(rawHeader);
-    if (normalizedRaw) {
-      return {
-        x402Version: normalizedRaw.x402Version,
-        requirement: selectRequirement(normalizedRaw),
-      };
-    }
+  // v2 sends PAYMENT-REQUIRED (base64 JSON); v1 used X-Payment-Required or
+  // the JSON body. Read the header first and fall back to the body.
+  for (const name of ["PAYMENT-REQUIRED", "X-Payment-Required"]) {
+    const header = resp.headers.get(name);
+    if (!header) continue;
+
+    const normalizedRaw = normalizePaymentRequired(safeJsonParse(header));
+    if (normalizedRaw) return toParsed(normalizedRaw);
 
     try {
       const decoded = Buffer.from(header, "base64").toString("utf-8");
       const parsedDecoded = normalizePaymentRequired(safeJsonParse(decoded));
-      if (parsedDecoded) {
-        return {
-          x402Version: parsedDecoded.x402Version,
-          requirement: selectRequirement(parsedDecoded),
-        };
-      }
+      if (parsedDecoded) return toParsed(parsedDecoded);
     } catch {
-      // Ignore header decode errors and continue with body parsing.
+      // Ignore header decode errors and continue with the next source.
     }
   }
 
   try {
     const body = await resp.json();
     const parsedBody = normalizePaymentRequired(body);
-    if (!parsedBody) return null;
-    return {
-      x402Version: parsedBody.x402Version,
-      requirement: selectRequirement(parsedBody),
-    };
+    return parsedBody ? toParsed(parsedBody) : null;
   } catch {
     return null;
   }
@@ -452,6 +502,7 @@ async function signPayment(
   account: PrivateKeyAccount,
   requirement: PaymentRequirement,
   x402Version: number,
+  resource?: Record<string, unknown>,
 ): Promise<any> {
   const chain = CHAINS[requirement.network];
   if (!chain) {
@@ -472,8 +523,8 @@ async function signPayment(
 
   // EIP-712 typed data for TransferWithAuthorization
   const domain = {
-    name: "USD Coin",
-    version: "2",
+    name: requirement.domainName,
+    version: requirement.domainVersion,
     chainId: chain.id,
     verifyingContract: requirement.usdcAddress,
   } as const;
@@ -505,20 +556,32 @@ async function signPayment(
     message,
   });
 
+  const payload = {
+    signature,
+    authorization: {
+      from: account.address,
+      to: requirement.payToAddress,
+      value: amount.toString(),
+      validAfter: validAfter.toString(),
+      validBefore: validBefore.toString(),
+      nonce,
+    },
+  };
+
+  if (x402Version >= 2) {
+    // v2 PaymentPayload: echo the chosen requirement unchanged as `accepted`.
+    return {
+      x402Version,
+      ...(resource ? { resource } : {}),
+      accepted: requirement.raw,
+      payload,
+    };
+  }
+
   return {
     x402Version,
     scheme: requirement.scheme,
     network: requirement.network,
-    payload: {
-      signature,
-      authorization: {
-        from: account.address,
-        to: requirement.payToAddress,
-        value: amount.toString(),
-        validAfter: validAfter.toString(),
-        validBefore: validBefore.toString(),
-        nonce,
-      },
-    },
+    payload,
   };
 }
