@@ -40,6 +40,12 @@ curl -fsSL https://conway.tech/automaton.sh | sh
 
 Note: Conway Cloud, Domains, and Inference has seen immense demand. We are working on scaling & perfomance.
 
+### Revival fork: running without Conway Cloud
+
+This fork keeps the original runtime and adds a **self-hosted backend**. The automaton runs on your machine or in Docker, keeps a local credit ledger, and thinks with your own OpenAI/Anthropic keys or Ollama. No Conway account or SIWE provisioning is needed. Wallet, x402 payments, on-chain identity, self-modification and replication still work. Choose `self-hosted` in `automaton --setup` and fund the ledger with `automaton-cli fund 5.00`. See [docs/SELF-HOSTED.md](docs/SELF-HOSTED.md).
+
+The fork also builds on Node 26, runs its test suite on Windows, and merges a set of open upstream security fixes.
+
 ## How It Works
 
 Every automaton runs a continuous loop: **Think → Act → Observe → Repeat.**
