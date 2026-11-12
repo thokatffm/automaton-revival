@@ -321,22 +321,11 @@ export class InferenceRouter {
         continue;
       }
 
-      // Tool messages become user messages with tool_result content
+      // Tool messages pass through unchanged. The Anthropic client turns them
+      // into real tool_result blocks; flattening them into user text here
+      // left every tool_use without a result, which the API rejects (400).
       if (msg.role === "tool") {
-        const last = result[result.length - 1];
-        // If previous message was also a tool (now a user), merge into it
-        if (last && last.role === "user" && (last as any)._toolResultMerged) {
-          // Append to the merged content
-          last.content = last.content + "\n[tool_result:" + (msg.tool_call_id || "unknown") + "] " + msg.content;
-          continue;
-        }
-        // Otherwise create a new user message
-        const userMsg: ChatMessage & { _toolResultMerged?: boolean } = {
-          role: "user",
-          content: "[tool_result:" + (msg.tool_call_id || "unknown") + "] " + msg.content,
-          _toolResultMerged: true,
-        };
-        result.push(userMsg);
+        result.push({ ...msg });
         continue;
       }
 

@@ -131,6 +131,37 @@ describe("Anthropic request shape", () => {
     expect(assistant.content).toEqual([thinking, { type: "text", text: "listing" }, toolUse]);
   });
 
+  it("router + client deliver tool results as tool_result blocks (agent loop path)", async () => {
+    const db = new Database(":memory:");
+    db.exec(MIGRATION_V6);
+    const registry = new ModelRegistry(db);
+    registry.initialize();
+    const router = new InferenceRouter(db, registry, new InferenceBudgetTracker(db, DEFAULT_MODEL_STRATEGY_CONFIG));
+
+    reply = { id: "m1", content: [{ type: "text", text: "ok" }], usage: {}, stop_reason: "end_turn" };
+    const history: ChatMessage[] = [
+      { role: "system", content: "sys" },
+      { role: "system", content: "memory" },
+      { role: "assistant", content: "looking", tool_calls: [
+        { id: "toolu_a", type: "function", function: { name: "exec", arguments: "{}" } },
+        { id: "toolu_b", type: "function", function: { name: "check_credits", arguments: "{}" } },
+      ] },
+      { role: "tool", content: "out-a", tool_call_id: "toolu_a" },
+      { role: "tool", content: "out-b", tool_call_id: "toolu_b" },
+      { role: "user", content: "[system] keep going" },
+    ];
+    await client().chat(router.transformMessagesForProvider(history, "anthropic"));
+    db.close();
+
+    const sent = calls[0].body.messages;
+    const toolUse = sent.findIndex((m: any) => m.role === "assistant");
+    const next = sent[toolUse + 1];
+    expect(next.role).toBe("user");
+    const results = next.content.filter((b: any) => b.type === "tool_result");
+    expect(results.map((b: any) => b.tool_use_id)).toEqual(["toolu_a", "toolu_b"]);
+    expect(calls[0].body.system).toContain("memory");
+  });
+
   it("does not replay a turn whose tool calls were only partly executed", async () => {
     const c = client();
     const second = { type: "tool_use", id: "toolu_2", name: "exec", input: { command: "pwd" } };
