@@ -62,6 +62,20 @@ const PROTECTED_FILES: readonly string[] = Object.freeze([
   "self-mod/upstream.js",
   "self-mod/tools-manager.ts",
   "self-mod/tools-manager.js",
+  // Self-hosted backend: credit ledger, voucher verification and topup gate
+  // (editing these would let the agent mint credits or re-enable payments)
+  "backends/ledger.ts",
+  "backends/ledger.js",
+  "backends/vouchers.ts",
+  "backends/vouchers.js",
+  "backends/bootstrap.ts",
+  "backends/bootstrap.js",
+  "backends/self-hosted-client.ts",
+  "backends/self-hosted-client.js",
+  "backends/docker.ts",
+  "backends/docker.js",
+  "conway/topup.ts",
+  "conway/topup.js",
   // Skills infrastructure
   "skills/loader.ts",
   "skills/loader.js",

@@ -35,6 +35,59 @@ function selectSandboxTier(requestedMemoryMb: number) {
 import { isValidAddress } from "../identity/chain.js";
 import type { ChainType } from "../identity/chain.js";
 
+// ─── Spawn environment ───────────────────────────────────────────
+// Set once at startup from the parent's config (see backends/bootstrap.ts).
+// It decides which runtime a child installs, which backend fields go into
+// its genesis.json, and whether provider keys are handed over.
+
+export const DEFAULT_RUNTIME_REPO_URL = "https://github.com/Conway-Research/automaton.git";
+
+export interface SpawnEnvironment {
+  runtimeRepoUrl: string;
+  /** Extra non-secret fields merged into the child's genesis.json. */
+  genesisExtras: Record<string, unknown>;
+  /** Provider keys written to bootstrap-secrets.json (never genesis.json), or null. */
+  secrets: { openaiApiKey?: string; anthropicApiKey?: string } | null;
+}
+
+let spawnEnv: SpawnEnvironment = {
+  runtimeRepoUrl: DEFAULT_RUNTIME_REPO_URL,
+  genesisExtras: {},
+  secrets: null,
+};
+
+export function configureSpawnEnvironment(env: Partial<SpawnEnvironment>): void {
+  const url = env.runtimeRepoUrl ?? spawnEnv.runtimeRepoUrl;
+  if (!isSafeRepoUrl(url)) {
+    throw new Error(`Invalid runtimeRepoUrl: ${url}`);
+  }
+  spawnEnv = {
+    runtimeRepoUrl: url,
+    genesisExtras: env.genesisExtras ?? spawnEnv.genesisExtras,
+    secrets: env.secrets === undefined ? spawnEnv.secrets : env.secrets,
+  };
+}
+
+export function getSpawnEnvironment(): SpawnEnvironment {
+  return spawnEnv;
+}
+
+/** https URL with a conservative character set, safe to place in a shell command. */
+export function isSafeRepoUrl(url: string): boolean {
+  return /^https:\/\/[A-Za-z0-9.-]+(:\d+)?\/[A-Za-z0-9._~\/-]+$/.test(url);
+}
+
+function runtimeInstallCommand(): string {
+  return `git clone ${spawnEnv.runtimeRepoUrl} /root/automaton && cd /root/automaton && npm install && npm run build`;
+}
+
+async function writeChildBootstrapSecrets(childConway: ConwayClient): Promise<void> {
+  const s = spawnEnv.secrets;
+  if (!s || (!s.openaiApiKey && !s.anthropicApiKey)) return;
+  await childConway.writeFile("/root/.automaton/bootstrap-secrets.json", JSON.stringify(s));
+  await childConway.exec("chmod 600 /root/.automaton/bootstrap-secrets.json", 5000);
+}
+
 /**
  * Validate that an address is a well-formed, non-zero wallet address.
  * Supports both EVM (0x...) and Solana (base58) addresses.
@@ -129,7 +182,7 @@ export async function spawnChild(
     // Install runtime (on the CHILD sandbox)
     await childConway.exec("apt-get update -qq && apt-get install -y -qq nodejs npm git curl", 120_000);
     await childConway.exec(
-      "git clone https://github.com/Conway-Research/automaton.git /root/automaton && cd /root/automaton && npm install && npm run build",
+      runtimeInstallCommand(),
       180_000,
     );
 
@@ -137,6 +190,7 @@ export async function spawnChild(
     await childConway.exec("mkdir -p /root/.automaton", 10_000);
     const genesisJson = JSON.stringify(
       {
+        ...spawnEnv.genesisExtras,
         name: genesis.name,
         genesisPrompt: genesis.genesisPrompt,
         creatorMessage: genesis.creatorMessage,
@@ -148,6 +202,7 @@ export async function spawnChild(
       2,
     );
     await childConway.writeFile("/root/.automaton/genesis.json", genesisJson);
+    await writeChildBootstrapSecrets(childConway);
 
     // Propagate constitution with hash verification
     try {
@@ -269,13 +324,14 @@ async function spawnChildLegacy(
       120_000,
     );
     await childConway.exec(
-      "git clone https://github.com/Conway-Research/automaton.git /root/automaton && cd /root/automaton && npm install && npm run build",
+      runtimeInstallCommand(),
       180_000,
     );
     await childConway.exec("mkdir -p /root/.automaton", 10_000);
 
     const legacyGenesisJson = JSON.stringify(
       {
+        ...spawnEnv.genesisExtras,
         name: genesis.name,
         genesisPrompt: genesis.genesisPrompt,
         creatorMessage: genesis.creatorMessage,
@@ -287,6 +343,7 @@ async function spawnChildLegacy(
       2,
     );
     await childConway.writeFile("/root/.automaton/genesis.json", legacyGenesisJson);
+    await writeChildBootstrapSecrets(childConway);
 
     try {
       await propagateConstitution(childConway, sandbox.id, db.raw);

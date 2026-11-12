@@ -4,7 +4,8 @@
  * Transfer Conway credits using the configured Conway API key.
  */
 
-import { loadConfig } from "@conway/automaton/config.js";
+import { loadConfig, resolvePath } from "@conway/automaton/config.js";
+import { CreditLedger } from "@conway/automaton/backends/ledger.js";
 
 const args = process.argv.slice(3);
 const amount = args[0];
@@ -25,14 +26,37 @@ if (!config) {
   process.exit(1);
 }
 
-if (!config.conwayApiKey) {
-  console.log("No Conway API key found in automaton config.");
-  process.exit(1);
-}
-
 const amountCents = parseAmountToCents(amount);
 if (amountCents <= 0) {
   console.log(`Invalid amount: ${amount}`);
+  process.exit(1);
+}
+
+// Self-hosted backend: credits are a local ledger in the automaton's state.db.
+// The creator funds it directly from the host; there is no Conway account.
+if (config.backend === "self-hosted") {
+  if (toAddress) {
+    console.log("--to is not supported on the self-hosted backend: run fund on the host of the target automaton.");
+    process.exit(1);
+  }
+  const dbPath = resolvePath(config.dbPath);
+  const { entry, balanceCents } = CreditLedger.fundDatabase(
+    dbPath,
+    amountCents,
+    `fund via automaton-cli (${config.name})`,
+  );
+  console.log(`
+Ledger funded.
+Automaton: ${config.name} (${config.walletAddress})
+Amount:    $${(amountCents / 100).toFixed(2)} (${amountCents} cents)
+Entry:     ${entry.id}
+Balance:   $${(balanceCents / 100).toFixed(2)} after funding
+`);
+  process.exit(0);
+}
+
+if (!config.conwayApiKey) {
+  console.log("No Conway API key found in automaton config.");
   process.exit(1);
 }
 

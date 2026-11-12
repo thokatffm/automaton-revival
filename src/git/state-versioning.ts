@@ -62,6 +62,7 @@ wallet.json
 config.json
 automaton.json
 inference-providers.json
+bootstrap-secrets.json
 state.db
 state.db-wal
 state.db-shm

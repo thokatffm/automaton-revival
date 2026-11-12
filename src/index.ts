@@ -11,10 +11,15 @@ import fs from "fs";
 import path from "path";
 import { getWallet, getAutomatonDir } from "./identity/wallet.js";
 import { provision, loadApiKeyFromConfig } from "./identity/provision.js";
-import { loadConfig, resolvePath } from "./config.js";
+import { loadConfig, resolvePath, saveConfig } from "./config.js";
 import { createDatabase } from "./state/database.js";
-import { createConwayClient } from "./conway/client.js";
 import { createInferenceClient } from "./conway/inference.js";
+import {
+  createInfraClient,
+  configFromGenesis,
+  removeBootstrapSecrets,
+  isSelfHosted,
+} from "./backends/bootstrap.js";
 import { createHeartbeatDaemon } from "./heartbeat/daemon.js";
 import {
   loadHeartbeatConfig,
@@ -186,19 +191,34 @@ Version:    ${config.version}
 async function run(): Promise<void> {
   logger.info(`[${new Date().toISOString()}] Conway Automaton v${VERSION} starting...`);
 
-  // Load config — first run triggers interactive setup wizard
+  // Load config. A child sandbox gets a genesis.json from its parent and is
+  // configured from it non-interactively; otherwise the first run triggers
+  // the interactive setup wizard.
   let config = loadConfig();
   if (!config) {
-    const { runSetupWizard } = await import("./setup/wizard.js");
-    config = await runSetupWizard();
+    const { chainIdentity: genesisWallet } = await getWallet();
+    const fromGenesis = configFromGenesis(genesisWallet.address);
+    if (fromGenesis) {
+      saveConfig(fromGenesis);
+      removeBootstrapSecrets();
+      config = loadConfig() ?? fromGenesis;
+      logger.info(`[${new Date().toISOString()}] Configured from genesis.json (backend: ${config.backend ?? "conway"}).`);
+    } else {
+      const { runSetupWizard } = await import("./setup/wizard.js");
+      config = await runSetupWizard();
+    }
   }
 
   // Load wallet (chain-aware)
   const { account, chainIdentity, chainType: walletChainType } = await getWallet();
   const resolvedChainType = config.chainType || walletChainType || "evm";
-  const apiKey = config.conwayApiKey || loadApiKeyFromConfig();
-  if (!apiKey) {
-    logger.error("No API key found. Run: automaton --provision");
+  const selfHosted = isSelfHosted(config);
+  // The self-hosted backend needs no Conway account at all.
+  const apiKey = selfHosted ? "" : config.conwayApiKey || loadApiKeyFromConfig() || "";
+  if (!selfHosted && !apiKey) {
+    logger.error(
+      'No API key found. Run: automaton --provision, or set "backend": "self-hosted" in automaton.json to run without Conway.',
+    );
     process.exit(1);
   }
 
@@ -238,12 +258,16 @@ async function run(): Promise<void> {
     db.setIdentity("automatonId", automatonId);
   }
 
-  // Create Conway client
-  const conway = createConwayClient({
-    apiUrl: config.conwayApiUrl,
+  // Create the infrastructure client for the configured backend
+  const { conway } = createInfraClient({
+    config,
     apiKey,
-    sandboxId: config.sandboxId,
+    db: db.raw,
+    account,
+    selfAddress: chainIdentity.address,
+    chainType: resolvedChainType,
   });
+  logger.info(`[${new Date().toISOString()}] Backend: ${selfHosted ? "self-hosted" : "conway"}`);
 
   // Register automaton identity (one-time, immutable)
   const registrationState = db.getIdentity("conwayRegistrationStatus");
@@ -294,6 +318,7 @@ async function run(): Promise<void> {
     anthropicApiKey: config.anthropicApiKey,
     ollamaBaseUrl,
     getModelProvider: (modelId) => modelRegistry.get(modelId)?.provider,
+    conwayEnabled: !selfHosted,
   });
 
   if (ollamaBaseUrl) {
@@ -338,7 +363,8 @@ async function run(): Promise<void> {
 
   // Bootstrap topup: buy minimum credits ($5) from USDC so the agent can start.
   // The agent decides larger topups itself via the topup_credits tool.
-  try {
+  // (Self-hosted: topups are disabled; credits come from the local ledger.)
+  if (!selfHosted) try {
     let bootstrapTimer: ReturnType<typeof setTimeout>;
     const bootstrapTimeout = new Promise<null>((_, reject) => {
       bootstrapTimer = setTimeout(() => reject(new Error("bootstrap topup timed out")), 15_000);

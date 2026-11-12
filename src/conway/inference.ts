@@ -29,9 +29,26 @@ interface InferenceClientOptions {
   ollamaBaseUrl?: string;
   /** Optional registry lookup — if provided, used before name heuristics */
   getModelProvider?: (modelId: string) => string | undefined;
+  /**
+   * When false (self-hosted backend) Conway Compute is never used: models
+   * route to BYOK providers or Ollama, and an unroutable model is an error
+   * instead of a silent call to api.conway.tech. Defaults to true.
+   */
+  conwayEnabled?: boolean;
 }
 
 type InferenceBackend = "conway" | "openai" | "anthropic" | "ollama";
+
+export class NoInferenceProviderError extends Error {
+  constructor(model: string) {
+    super(
+      `No inference provider configured for model "${model}". ` +
+        `Set openaiApiKey / anthropicApiKey or ollamaBaseUrl in automaton.json, ` +
+        `or pick a model whose provider is configured (automaton --pick-model).`,
+    );
+    this.name = "NoInferenceProviderError";
+  }
+}
 
 function isLoopbackHttpUrl(url: string | undefined): boolean {
   if (!url) return false;
@@ -69,6 +86,7 @@ export function createInferenceClient(
       anthropicApiKey,
       ollamaBaseUrl,
       getModelProvider,
+      conwayEnabled: options.conwayEnabled !== false,
     });
 
     // Newer models (o-series, gpt-5.x, gpt-4.1) require max_completion_tokens.
@@ -181,24 +199,34 @@ function resolveInferenceBackend(
     anthropicApiKey?: string;
     ollamaBaseUrl?: string;
     getModelProvider?: (modelId: string) => string | undefined;
+    conwayEnabled?: boolean;
   },
 ): InferenceBackend {
+  const conwayEnabled = keys.conwayEnabled !== false;
+
   // Registry-based routing: most accurate, no name guessing
   if (keys.getModelProvider) {
     const provider = keys.getModelProvider(model);
     if (provider === "ollama" && keys.ollamaBaseUrl) return "ollama";
     if (provider === "anthropic" && keys.anthropicApiKey) return "anthropic";
     if (provider === "openai" && keys.openaiApiKey) return "openai";
-    if (provider === "conway") return "conway";
+    if (provider === "conway" && conwayEnabled) return "conway";
     // provider unknown or key not configured — fall through to heuristics
   }
 
   // Heuristic fallback (model not in registry yet)
   if (keys.anthropicApiKey && /^claude/i.test(model)) return "anthropic";
   if (keys.openaiApiKey && /^(gpt-[3-9]|gpt-4|gpt-5|o[1-9][-\s.]|o[1-9]$|chatgpt)/i.test(model)) return "openai";
-  return "conway";
+  if (conwayEnabled) return "conway";
 
+  // Self-hosted: Ollama model names look like "name:tag" or plain local
+  // names; anything not claimed by a BYOK provider goes to Ollama if set.
+  if (keys.ollamaBaseUrl) return "ollama";
+  throw new NoInferenceProviderError(model);
 }
+
+/** Exported for tests. */
+export const __resolveInferenceBackendForTest = resolveInferenceBackend;
 
 async function chatViaOpenAiCompatible(params: {
   model: string;

@@ -75,7 +75,41 @@ export interface AutomatonConfig {
   rpcUrl?: string;
   /** Chain type for this automaton. Defaults to "evm" if absent. */
   chainType?: ChainType;
+  /**
+   * Infrastructure backend. "conway" (default, original behaviour) uses
+   * Conway Cloud for sandboxes, credits, domains and inference fallback.
+   * "self-hosted" runs without any Conway account: sandboxes are local or
+   * Docker, credits are a local ledger, inference uses BYOK keys / Ollama.
+   */
+  backend?: InfraBackend;
+  /** Settings for the self-hosted backend (ignored for "conway"). */
+  selfHosted?: SelfHostedConfig;
 }
+
+export type InfraBackend = "conway" | "self-hosted";
+
+export interface SelfHostedConfig {
+  /** Where the agent's own shell runs: directly on the host, or in a Docker container. */
+  sandbox: "local" | "docker";
+  /** Container the agent's exec/file tools target when sandbox = "docker". */
+  containerName?: string;
+  /** Image used for new child sandboxes (and the agent's own container if it must be created). */
+  dockerImage: string;
+  /** Git URL children clone to install the runtime. */
+  runtimeRepoUrl: string;
+  /** Inference provider keys are copied into child sandboxes only when true. */
+  shareProviderKeysWithChildren: boolean;
+  /** Ollama URL handed to children (containers reach the host via host.docker.internal). */
+  childOllamaBaseUrl?: string;
+}
+
+export const DEFAULT_SELF_HOSTED_CONFIG: SelfHostedConfig = {
+  sandbox: "local",
+  dockerImage: "node:22-bookworm",
+  runtimeRepoUrl: "https://github.com/Conway-Research/automaton.git",
+  shareProviderKeysWithChildren: false,
+  childOllamaBaseUrl: "http://host.docker.internal:11434",
+};
 
 export const DEFAULT_CONFIG: Partial<AutomatonConfig> = {
   conwayApiUrl: "https://api.conway.tech",

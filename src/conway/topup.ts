@@ -23,6 +23,22 @@ const logger = createLogger("topup");
 /** Valid topup tier amounts in USD. */
 export const TOPUP_TIERS = [5, 25, 100, 500, 1000, 2500];
 
+// ─── Backend gate ────────────────────────────────────────────────
+// Topups pay real USDC to Conway in exchange for Conway credits. On the
+// self-hosted backend Conway credits are meaningless, so every topup path
+// (bootstrap, inline, heartbeat, sandbox-402 retry, topup_credits tool)
+// must refuse instead of sending money to a service that grants nothing.
+let topupDisabledReason: string | null = null;
+
+/** Disable (reason) or re-enable (null) all credit topups for this process. */
+export function setTopupDisabled(reason: string | null): void {
+  topupDisabledReason = reason;
+}
+
+export function getTopupDisabledReason(): string | null {
+  return topupDisabledReason;
+}
+
 export interface TopupResult {
   success: boolean;
   amountUsd: number;
@@ -42,6 +58,11 @@ export async function topupCredits(
   amountUsd: number,
   recipientAddress?: Address,
 ): Promise<TopupResult> {
+  if (topupDisabledReason) {
+    logger.warn(`Credit topup refused: ${topupDisabledReason}`);
+    return { success: false, amountUsd, error: topupDisabledReason };
+  }
+
   const address = recipientAddress || account.address;
   const url = `${apiUrl}/pay/${amountUsd}/${address}`;
 

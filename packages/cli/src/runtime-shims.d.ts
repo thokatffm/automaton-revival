@@ -11,6 +11,7 @@ declare module "@conway/automaton/config.js" {
     openaiApiKey?: string;
     anthropicApiKey?: string;
     socialRelayUrl?: string;
+    backend?: "conway" | "self-hosted";
   }
 
   export function loadConfig(): AutomatonCliConfig | null;
@@ -55,4 +56,14 @@ declare module "@conway/automaton/state/database.js" {
   }
 
   export function createDatabase(path: string): AutomatonCliDatabase;
+}
+
+declare module "@conway/automaton/backends/ledger.js" {
+  export class CreditLedger {
+    static fundDatabase(
+      dbPath: string,
+      amountCents: number,
+      note?: string,
+    ): { entry: { id: string }; balanceCents: number };
+  }
 }

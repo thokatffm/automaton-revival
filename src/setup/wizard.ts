@@ -1,8 +1,8 @@
 import fs from "fs";
 import path from "path";
 import chalk from "chalk";
-import type { AutomatonConfig, TreasuryPolicy } from "../types.js";
-import { DEFAULT_TREASURY_POLICY } from "../types.js";
+import type { AutomatonConfig, TreasuryPolicy, InfraBackend, SelfHostedConfig } from "../types.js";
+import { DEFAULT_TREASURY_POLICY, DEFAULT_SELF_HOSTED_CONFIG } from "../types.js";
 import { getWallet, getAutomatonDir } from "../identity/wallet.js";
 import { provision } from "../identity/provision.js";
 import { createConfig, saveConfig } from "../config.js";
@@ -45,13 +45,30 @@ export async function runSetupWizard(): Promise<AutomatonConfig> {
   }
   console.log(chalk.dim(`  Private key stored at: ${getAutomatonDir()}/wallet.json\n`));
 
-  // ─── 2. Provision API key ─────────────────────────────────────
+  // ─── 2. Backend + (Conway only) provision API key ─────────────
+  console.log(chalk.cyan("  [2/6] Infrastructure backend"));
+  console.log(chalk.dim("  self-hosted: your machine / Docker, local credit ledger, your own API keys or Ollama."));
+  console.log(chalk.dim("  conway:      Conway Cloud sandboxes, credits and inference (needs a Conway account).\n"));
+  const backendInput = (await promptOptional("Backend (self-hosted or conway) [self-hosted]")).toLowerCase();
+  const backend: InfraBackend = backendInput === "conway" ? "conway" : "self-hosted";
+  let selfHosted: SelfHostedConfig | undefined;
+  if (backend === "self-hosted") {
+    const sandboxInput = (await promptOptional("Run the agent's shell on this host or in Docker? (local or docker) [local]")).toLowerCase();
+    selfHosted = { ...DEFAULT_SELF_HOSTED_CONFIG, sandbox: sandboxInput === "docker" ? "docker" : "local" };
+    if (selfHosted.sandbox === "docker") {
+      selfHosted.containerName = await promptRequired("Name of the running Docker container the agent should use");
+    }
+    console.log(chalk.green(`  Backend: self-hosted (${selfHosted.sandbox})\n`));
+  } else {
+    console.log(chalk.green("  Backend: Conway Cloud\n"));
+  }
+
   const provisionLabel = walletChainType === "solana"
-    ? "  [2/6] Provisioning Conway API key (SIWS)..."
-    : "  [2/6] Provisioning Conway API key (SIWE)...";
-  console.log(chalk.cyan(provisionLabel));
+    ? "  Provisioning Conway API key (SIWS)..."
+    : "  Provisioning Conway API key (SIWE)...";
   let apiKey = "";
-  try {
+  if (backend === "conway") try {
+    console.log(chalk.cyan(provisionLabel));
     const result = await provision(undefined, walletChainType === "solana" ? chainIdentity : undefined);
     apiKey = result.apiKey;
     console.log(chalk.green(`  API key provisioned: ${result.keyPrefix}...\n`));
@@ -75,7 +92,7 @@ export async function runSetupWizard(): Promise<AutomatonConfig> {
     }
   }
 
-  if (!apiKey) {
+  if (backend === "conway" && !apiKey) {
     console.log(chalk.yellow("  No API key set. The automaton will have limited functionality.\n"));
   }
 
@@ -120,8 +137,11 @@ export async function runSetupWizard(): Promise<AutomatonConfig> {
       ollamaBaseUrl ? "Ollama" : null,
     ].filter(Boolean).join(", ");
     console.log(chalk.green(`  Provider keys/URLs saved: ${providers}\n`));
-  } else {
+  } else if (backend === "conway") {
     console.log(chalk.dim("  No provider keys set. Inference will default to Conway.\n"));
+  } else {
+    console.log(chalk.yellow("  No provider keys set. The self-hosted backend needs an OpenAI/Anthropic key or Ollama to think."));
+    console.log(chalk.yellow("  Add one later with: automaton --configure\n"));
   }
 
   // ─── Financial Safety Policy ─────────────────────────────────
@@ -176,6 +196,10 @@ export async function runSetupWizard(): Promise<AutomatonConfig> {
     treasuryPolicy,
     chainType: walletChainType,
   });
+  config.backend = backend;
+  if (selfHosted) config.selfHosted = selfHosted;
+  // Docker sandboxes are addressed by container name, not a Conway sandbox id.
+  if (backend === "self-hosted") config.sandboxId = "";
 
   saveConfig(config);
   console.log(chalk.green("  automaton.json written"));
@@ -205,7 +229,13 @@ export async function runSetupWizard(): Promise<AutomatonConfig> {
 
   // ─── 6. Funding guidance ──────────────────────────────────────
   console.log(chalk.cyan("  [6/6] Funding\n"));
-  showFundingPanel(walletAddress, walletChainType);
+  if (backend === "self-hosted") {
+    console.log(chalk.white("  Self-hosted credits are a local budget for inference spend."));
+    console.log(chalk.white("  Fund it from this machine with:  automaton-cli fund 5.00"));
+    console.log(chalk.dim(`  USDC sent to ${walletAddress} stays in the agent's wallet for x402 payments.\n`));
+  } else {
+    showFundingPanel(walletAddress, walletChainType);
+  }
 
   closePrompts();
 
