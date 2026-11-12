@@ -23,6 +23,21 @@ import { execFileSync } from "child_process";
 
 type ExecResult = { stdout: string; stderr?: string; exitCode: number };
 
+/**
+ * POSIX shell to run the client's commands with. On Windows, a bare "bash"
+ * usually resolves to WSL's launcher, which does not forward HOME and runs
+ * git against a different filesystem, so prefer Git for Windows' bash and
+ * skip the suite when it is not installed.
+ */
+const BASH: string | null = (() => {
+  if (process.platform !== "win32") return "bash";
+  const candidates = [
+    path.join(process.env.ProgramFiles || "C:\\Program Files", "Git", "bin", "bash.exe"),
+    path.join(process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)", "Git", "bin", "bash.exe"),
+  ];
+  return candidates.find((c) => fs.existsSync(c)) ?? null;
+})();
+
 /** Minimal ConwayClient stand-in that runs the emitted shell locally. */
 function makeLocalClient(home: string) {
   return {
@@ -31,7 +46,7 @@ function makeLocalClient(home: string) {
       // git semantics under test are the genuine ones. `gitCommit` checks
       // exitCode, so it must be populated (the real client returns it).
       try {
-        const stdout = execFileSync("bash", ["-c", cmd], {
+        const stdout = execFileSync(BASH ?? "bash", ["-c", cmd], {
           env: { ...process.env, HOME: home },
           encoding: "utf-8",
           stdio: ["ignore", "pipe", "pipe"],
@@ -114,7 +129,7 @@ afterEach(() => {
   }
 });
 
-describe("initStateRepo gitignore", () => {
+describe.skipIf(BASH === null)("initStateRepo gitignore", () => {
   it("does not commit automaton.json (the real config with API keys)", async () => {
     const { initStateRepo } = await import("../git/state-versioning.js");
     const prevHome = process.env.HOME;

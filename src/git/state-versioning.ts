@@ -7,7 +7,7 @@
  */
 
 import type { ConwayClient, AutomatonDatabase } from "../types.js";
-import { gitInit, gitCommit, gitStatus, gitLog } from "./tools.js";
+import { gitInit, gitCommit, gitStatus, gitLog, escapeShellArg } from "./tools.js";
 
 const AUTOMATON_DIR = "~/.automaton";
 
@@ -79,7 +79,7 @@ logs/
 
   // Configure git user
   await conway.exec(
-    `cd ${dir} && git config user.name "Automaton" && git config user.email "automaton@conway.tech"`,
+    `cd ${escapeShellArg(dir)} && git config user.name "Automaton" && git config user.email "automaton@conway.tech"`,
     5000,
   );
 

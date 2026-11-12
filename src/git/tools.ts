@@ -216,6 +216,6 @@ export async function gitInit(
   return result.stdout || "Git initialized";
 }
 
-function escapeShellArg(arg: string): string {
+export function escapeShellArg(arg: string): string {
   return `'${arg.replace(/'/g, "'\\''")}'`;
 }
