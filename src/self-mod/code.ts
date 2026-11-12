@@ -157,6 +157,7 @@ function resolveAndValidatePath(filePath: string): string | null {
  */
 export function isProtectedFile(filePath: string): boolean {
   const resolved = path.resolve(filePath);
+  const posixResolved = resolved.replace(/\\/g, "/").replace(/^[A-Za-z]:/, "");
 
   // Check against protected file patterns using path-segment matching
   for (const pattern of PROTECTED_FILES) {
@@ -177,8 +178,10 @@ export function isProtectedFile(filePath: string): boolean {
         resolved === pattern) {
       return true;
     }
-    // Handle absolute patterns like /etc/systemd
-    if (pattern.startsWith("/") && resolved.startsWith(pattern)) {
+    // Handle absolute patterns like /etc/systemd. Compare against a POSIX form
+    // of the resolved path so the check also holds on Windows, where
+    // path.resolve("/etc/x") yields "C:\etc\x".
+    if (pattern.startsWith("/") && posixResolved.startsWith(pattern)) {
       return true;
     }
   }

@@ -240,6 +240,21 @@ describe("write_file / edit_own_file protection parity", () => {
     expect(result).toContain("File written");
     expect(result).toContain("/root/.automaton/skills/test/SKILL.md");
   });
+
+  it("write_file blocks backslash and drive-letter paths that could escape on Windows hosts", async () => {
+    const writeTool = tools.find((t) => t.name === "write_file")!;
+    const attempts = [
+      "..\\..\\Windows\\System32\\evil.dll",
+      "project\\..\\..\\escape.txt",
+      "C:\\Users\\victim\\file.txt",
+      "C:/Users/victim/file.txt",
+      "d:relative.txt",
+    ];
+    for (const p of attempts) {
+      const result = await writeTool.execute({ path: p, content: "x" }, ctx);
+      expect(result, `write_file should block ${p}`).toContain("Blocked");
+    }
+  });
 });
 
 // ─── read_file Sensitive File Blocking ──────────────────────────

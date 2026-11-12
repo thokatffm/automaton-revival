@@ -42,7 +42,9 @@ export class AgentWorkspace implements AgentWorkspace {
 
     this.goalId = normalizedGoalId;
     this.basePath = path.resolve(
-      basePath ?? path.join(os.homedir(), ".automaton", "workspace", normalizedGoalId),
+      // Honour HOME like the rest of the runtime does; os.homedir() alone
+      // ignores HOME on Windows (it reads USERPROFILE).
+      basePath ?? path.join(process.env.HOME || os.homedir(), ".automaton", "workspace", normalizedGoalId),
     );
 
     this.outputsPath = path.join(this.basePath, "outputs");

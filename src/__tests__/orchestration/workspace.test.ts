@@ -174,9 +174,13 @@ describe("orchestration/workspace", () => {
     const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), "workspace-home-"));
     tmpRoots.push(fakeHome);
 
+    // The runtime prefers HOME and falls back to os.homedir(); point both at
+    // the fake home so the test holds on every platform.
     vi.spyOn(os, "homedir").mockReturnValue(fakeHome);
+    vi.stubEnv("HOME", fakeHome);
 
     const ws = createWorkspace("goal-create");
+    vi.unstubAllEnvs();
     expect(ws.basePath).toBe(path.join(fakeHome, ".automaton", "workspace", "goal-create"));
     expect(fs.existsSync(path.join(fakeHome, ".automaton", "workspace", "goal-create", "outputs"))).toBe(true);
   });
