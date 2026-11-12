@@ -26,7 +26,7 @@ Run `automaton --setup` and choose `self-hosted` (the default). Or edit `~/.auto
   "selfHosted": {
     "sandbox": "local",
     "dockerImage": "node:22-bookworm",
-    "runtimeRepoUrl": "https://github.com/Conway-Research/automaton.git",
+    "runtimeRepoUrl": "https://github.com/thokatffm/automaton-revival.git",
     "shareProviderKeysWithChildren": false,
     "childOllamaBaseUrl": "http://host.docker.internal:11434"
   },
@@ -38,7 +38,7 @@ Run `automaton --setup` and choose `self-hosted` (the default). Or edit `~/.auto
 
 - `sandbox: "local"` runs the agent's `exec` tool directly on this machine, as your user. The sandbox home `/root` maps to your home directory. Use it only on a machine or VM you are willing to hand to the agent.
 - `sandbox: "docker"` sends `exec` and file tools into an existing container. Set `containerName` to a running container (for example `docker run -d --name automaton-main node:22-bookworm sleep infinity`).
-- `runtimeRepoUrl` is what children `git clone` to install the runtime. Point it at your fork so children run this revived code, not upstream.
+- `runtimeRepoUrl` is what children `git clone` to install the runtime. It defaults to this fork (`thokatffm/automaton-revival`), so children run the revived code. Point it at your own fork if you change the runtime.
 - Set `modelStrategy.lowComputeModel` to a model you actually have. The default `gpt-5-mini` needs an OpenAI key.
 
 ## Funding

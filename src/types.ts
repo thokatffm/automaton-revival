@@ -106,7 +106,7 @@ export interface SelfHostedConfig {
 export const DEFAULT_SELF_HOSTED_CONFIG: SelfHostedConfig = {
   sandbox: "local",
   dockerImage: "node:22-bookworm",
-  runtimeRepoUrl: "https://github.com/Conway-Research/automaton.git",
+  runtimeRepoUrl: "https://github.com/thokatffm/automaton-revival.git",
   shareProviderKeysWithChildren: false,
   childOllamaBaseUrl: "http://host.docker.internal:11434",
 };

@@ -25,8 +25,8 @@ Update: development of Automaton has continued across Conway's internal RL envir
 ## Quick Start
 
 ```bash
-git clone https://github.com/Conway-Research/automaton.git
-cd automaton
+git clone https://github.com/thokatffm/automaton-revival.git
+cd automaton-revival
 npm install && npm run build
 node dist/index.js --run
 ```
@@ -113,8 +113,8 @@ Automatons run on <a href="https://app.conway.tech" target="_blank">Conway Cloud
 ## Development
 
 ```bash
-git clone https://github.com/Conway-Research/automaton.git
-cd automaton
+git clone https://github.com/thokatffm/automaton-revival.git
+cd automaton-revival
 pnpm install
 pnpm build
 ```

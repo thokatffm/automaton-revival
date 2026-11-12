@@ -40,7 +40,7 @@ import type { ChainType } from "../identity/chain.js";
 // It decides which runtime a child installs, which backend fields go into
 // its genesis.json, and whether provider keys are handed over.
 
-export const DEFAULT_RUNTIME_REPO_URL = "https://github.com/Conway-Research/automaton.git";
+export const DEFAULT_RUNTIME_REPO_URL = "https://github.com/thokatffm/automaton-revival.git";
 
 export interface SpawnEnvironment {
   runtimeRepoUrl: string;

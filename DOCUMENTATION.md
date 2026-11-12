@@ -55,8 +55,8 @@ This clones the repo, builds, and launches the setup wizard inside a Conway sand
 ### Manual install
 
 ```bash
-git clone https://github.com/Conway-Research/automaton.git
-cd automaton
+git clone https://github.com/thokatffm/automaton-revival.git
+cd automaton-revival
 pnpm install
 pnpm build
 node dist/index.js --run
@@ -77,8 +77,8 @@ On first run, the interactive setup wizard walks you through wallet generation, 
 ### From source
 
 ```bash
-git clone https://github.com/Conway-Research/automaton.git
-cd automaton
+git clone https://github.com/thokatffm/automaton-revival.git
+cd automaton-revival
 pnpm install
 pnpm build
 ```
