@@ -2166,6 +2166,18 @@ Model: ${ctx.inference.getDefaultModel()}
           if (!entry.enabled) {
             return `Model '${modelId}' is disabled in the registry.`;
           }
+          // Self-hosted has no Conway fallback: a model whose provider has no
+          // key or base URL configured cannot answer, so refuse the switch.
+          if (ctx.config.backend === "self-hosted") {
+            const reachable =
+              entry.provider === "openai" ? !!ctx.config.openaiApiKey :
+              entry.provider === "anthropic" ? !!ctx.config.anthropicApiKey :
+              entry.provider === "ollama" ? !!ctx.config.ollamaBaseUrl :
+              entry.provider !== "conway";
+            if (!reachable) {
+              return `Model '${modelId}' needs a ${entry.provider} provider, which is not configured on this automaton. Pick a model from a configured provider.`;
+            }
+          }
         } catch {
           // Registry not available, allow anyway
         }

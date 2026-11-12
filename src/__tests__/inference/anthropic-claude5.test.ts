@@ -179,3 +179,22 @@ describe("Anthropic request shape", () => {
     expect(assistant.content.filter((b: any) => b.type === "tool_use")).toHaveLength(1);
   });
 });
+
+describe("billing of failed inference calls", () => {
+  it("does not bill requests the provider rejected", async () => {
+    const { isClientRejection } = await import("../../inference/router.js");
+    const { NoInferenceProviderError } = await import("../../conway/inference.js");
+    expect(isClientRejection(new Error("Inference error (anthropic): 400: {\"type\":\"error\"}"))).toBe(true);
+    expect(isClientRejection(new Error("Inference error (anthropic): 401: invalid x-api-key"))).toBe(true);
+    expect(isClientRejection(new Error("Inference error: 404: model not found"))).toBe(true);
+    expect(isClientRejection(new NoInferenceProviderError("gpt-5.2"))).toBe(true);
+  });
+
+  it("still bills what may have run upstream", async () => {
+    const { isClientRejection } = await import("../../inference/router.js");
+    expect(isClientRejection(new Error("Inference error (anthropic): 429: rate limited"))).toBe(false);
+    expect(isClientRejection(new Error("Inference error (anthropic): 408: timeout"))).toBe(false);
+    expect(isClientRejection(new Error("Inference error (anthropic): 529: overloaded"))).toBe(false);
+    expect(isClientRejection(new Error("socket hang up"))).toBe(false);
+  });
+});

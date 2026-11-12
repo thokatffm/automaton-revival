@@ -28,6 +28,21 @@ const logger = createLogger("inference.router");
 
 type Database = BetterSqlite3.Database;
 
+/**
+ * True when the provider refused the request outright (HTTP 4xx other than
+ * 408/429) or no provider could take it at all. Neither is billed upstream.
+ */
+export function isClientRejection(error: unknown): boolean {
+  if (error && typeof error === "object" && (error as { name?: string }).name === "NoInferenceProviderError") {
+    return true;
+  }
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  const match = message.match(/Inference error(?: [(][^)]*[)])?: ([0-9]{3})(?![0-9])/);
+  if (!match) return false;
+  const status = Number(match[1]);
+  return status >= 400 && status < 500 && status !== 408 && status !== 429;
+}
+
 export class InferenceRouter {
   private db: Database;
   private registry: ModelRegistry;
@@ -183,7 +198,12 @@ export class InferenceRouter {
       }
       // Non-timeout failures (upstream 5xx, connection reset, provider error)
       // consumed the prompt too. Record the same estimate before rethrowing,
-      // so a retry storm cannot hide its cost.
+      // so a retry storm cannot hide its cost. A 4xx is the exception: the
+      // provider rejected the request without running it and bills nothing,
+      // so charging it would drain the credit ledger for no real spend.
+      if (isClientRejection(error)) {
+        throw error;
+      }
       const estimated = this.estimateRequestCost(model, transformedMessages);
       this.recordCostSafely({
         sessionId,
