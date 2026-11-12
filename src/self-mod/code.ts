@@ -20,6 +20,7 @@ import type {
   AutomatonDatabase,
 } from "../types.js";
 import { logModification } from "./audit-log.js";
+import os from "os";
 
 // ─── IMMUTABLE SAFETY INVARIANTS ─────────────────────────────
 // These are hard-coded and CANNOT be changed by the agent.
@@ -146,7 +147,7 @@ function resolveAndValidatePath(filePath: string): string | null {
     // Step 1: Resolve ~ to home
     let resolved = filePath;
     if (resolved.startsWith("~")) {
-      resolved = path.join(process.env.HOME || "/root", resolved.slice(1));
+      resolved = path.join(process.env.HOME || os.homedir(), resolved.slice(1));
     }
 
     // Step 2: Resolve to absolute path (handles .. and relative paths)

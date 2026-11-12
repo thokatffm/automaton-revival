@@ -12,6 +12,7 @@ import { getAutomatonDir } from "./identity/wallet.js";
 import { loadApiKeyFromConfig } from "./identity/provision.js";
 import { createLogger } from "./observability/logger.js";
 import type { ChainType } from "./identity/chain.js";
+import os from "os";
 
 const logger = createLogger("config");
 const CONFIG_FILENAME = "automaton.json";
@@ -106,7 +107,7 @@ export function saveConfig(config: AutomatonConfig): void {
  */
 export function resolvePath(p: string): string {
   if (p.startsWith("~")) {
-    return path.join(process.env.HOME || "/root", p.slice(1));
+    return path.join(process.env.HOME || os.homedir(), p.slice(1));
   }
   return p;
 }

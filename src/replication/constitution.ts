@@ -10,6 +10,7 @@ import pathLib from "path";
 import { createHash } from "crypto";
 import type { Database as DatabaseType } from "better-sqlite3";
 import type { ConwayClient } from "../types.js";
+import os from "os";
 
 /**
  * Compute SHA-256 hash of content.
@@ -28,7 +29,7 @@ export async function propagateConstitution(
   db: DatabaseType,
 ): Promise<void> {
   const constitutionPath = pathLib.join(
-    process.env.HOME || "/root",
+    process.env.HOME || os.homedir(),
     ".automaton",
     "constitution.md",
   );

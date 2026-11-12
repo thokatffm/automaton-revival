@@ -13,6 +13,7 @@ import type { Skill, AutomatonDatabase } from "../types.js";
 import { parseSkillMd } from "./format.js";
 import { sanitizeInput } from "../agent/injection-defense.js";
 import { createLogger } from "../observability/logger.js";
+import os from "os";
 
 const logger = createLogger("skills.loader");
 
@@ -186,7 +187,7 @@ export function getActiveSkillInstructions(skills: Skill[]): string {
 
 function resolveHome(p: string): string {
   if (p.startsWith("~")) {
-    return path.join(process.env.HOME || "/root", p.slice(1));
+    return path.join(process.env.HOME || os.homedir(), p.slice(1));
   }
   return p;
 }

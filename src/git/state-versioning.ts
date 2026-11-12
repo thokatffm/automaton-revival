@@ -8,11 +8,12 @@
 
 import type { ConwayClient, AutomatonDatabase } from "../types.js";
 import { gitInit, gitCommit, gitStatus, gitLog, escapeShellArg } from "./tools.js";
+import os from "os";
 
 const AUTOMATON_DIR = "~/.automaton";
 
 function resolveHome(p: string): string {
-  const home = process.env.HOME || "/root";
+  const home = process.env.HOME || os.homedir();
   if (p.startsWith("~")) {
     return `${home}${p.slice(1)}`;
   }

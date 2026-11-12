@@ -21,6 +21,7 @@ import type {
   ConwayClient,
 } from "../types.js";
 import { parseSkillMd } from "./format.js";
+import os from "os";
 
 // Validation patterns to prevent injection via path/URL arguments
 const SKILL_NAME_RE = /^[a-zA-Z0-9-]+$/;
@@ -225,7 +226,7 @@ export function listSkills(db: AutomatonDatabase): Skill[] {
 
 function resolveHome(p: string): string {
   if (p.startsWith("~")) {
-    return path.join(process.env.HOME || "/root", p.slice(1));
+    return path.join(process.env.HOME || os.homedir(), p.slice(1));
   }
   return p;
 }

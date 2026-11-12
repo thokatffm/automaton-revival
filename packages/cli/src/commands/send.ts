@@ -12,6 +12,7 @@ import { privateKeyToAccount, type PrivateKeyAccount } from "viem/accounts";
 import { keccak256, toBytes } from "viem";
 import fs from "fs";
 import path from "path";
+import os from "os";
 
 const args = process.argv.slice(3);
 const toAddress = args[0];
@@ -26,7 +27,7 @@ if (!toAddress || !messageText) {
 
 // Load wallet
 const walletPath = path.join(
-  process.env.HOME || "/root",
+  process.env.HOME || os.homedir(),
   ".automaton",
   "wallet.json",
 );
