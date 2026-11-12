@@ -159,7 +159,7 @@ describe("Anthropic request shape", () => {
     expect(next.role).toBe("user");
     const results = next.content.filter((b: any) => b.type === "tool_result");
     expect(results.map((b: any) => b.tool_use_id)).toEqual(["toolu_a", "toolu_b"]);
-    expect(calls[0].body.system).toContain("memory");
+    expect(JSON.stringify(calls[0].body.system)).toContain("memory");
   });
 
   it("does not replay a turn whose tool calls were only partly executed", async () => {
@@ -196,5 +196,40 @@ describe("billing of failed inference calls", () => {
     expect(isClientRejection(new Error("Inference error (anthropic): 408: timeout"))).toBe(false);
     expect(isClientRejection(new Error("Inference error (anthropic): 529: overloaded"))).toBe(false);
     expect(isClientRejection(new Error("socket hang up"))).toBe(false);
+  });
+});
+
+describe("prompt caching", () => {
+  it("caches the stable system prefix and leaves the status block uncached", async () => {
+    const { buildAnthropicSystem, SYSTEM_PROMPT_CACHE_SPLIT } = await import("../../conway/inference.js");
+    const blocks = buildAnthropicSystem(`rules and identity\n\n${SYSTEM_PROMPT_CACHE_SPLIT}\nCredits: $0.65`);
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0]).toEqual({ type: "text", text: "rules and identity\n\n", cache_control: { type: "ephemeral" } });
+    expect(blocks[1].text).toContain("Credits: $0.65");
+    expect(blocks[1].cache_control).toBeUndefined();
+    expect(buildAnthropicSystem("no marker here")).toEqual([{ type: "text", text: "no marker here" }]);
+  });
+
+  it("prices cache reads at 0.1x and cache writes at 1.25x of input", async () => {
+    const db = new Database(":memory:");
+    db.exec(MIGRATION_V6);
+    const registry = new ModelRegistry(db);
+    registry.initialize();
+    const budget = new InferenceBudgetTracker(db, DEFAULT_MODEL_STRATEGY_CONFIG);
+    const router = new InferenceRouter(db, registry, budget, (m) => m.provider === "anthropic");
+    const result = await router.route(
+      { messages: [{ role: "user", content: "hi" }], taskType: "agent_turn", tier: "normal", sessionId: "s", turnId: "t" },
+      async () => ({
+        id: "m", model: "claude-opus-5-5",
+        message: { role: "assistant", content: "ok" },
+        usage: { promptTokens: 1000, completionTokens: 500, totalTokens: 21500, cacheReadTokens: 20000, cacheWriteTokens: 0 },
+        finishReason: "stop",
+      }) as any,
+    );
+    // Opus 5.5: 1k input = 0.4c, 20k cache read = 0.8c, 500 output = 1.0c -> 2.2c -> 3c
+    expect(result.costCents).toBe(3);
+    const row = db.prepare("SELECT cache_hit FROM inference_costs").get() as { cache_hit: number };
+    expect(row.cache_hit).toBe(1);
+    db.close();
   });
 });

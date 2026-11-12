@@ -225,8 +225,14 @@ export class InferenceRouter {
     // 7. Calculate actual cost
     const inputTokens = response.usage?.promptTokens || 0;
     const outputTokens = response.usage?.completionTokens || 0;
+    const cacheReadTokens = response.usage?.cacheReadTokens || 0;
+    const cacheWriteTokens = response.usage?.cacheWriteTokens || 0;
+    // Anthropic bills cache reads at 0.1x and 5-minute cache writes at 1.25x
+    // the input price; both are reported apart from input_tokens.
     const actualCostCents = Math.ceil(
       (inputTokens / 1000) * model.costPer1kInput / 100 +
+      (cacheReadTokens / 1000) * model.costPer1kInput * 0.1 / 100 +
+      (cacheWriteTokens / 1000) * model.costPer1kInput * 1.25 / 100 +
       (outputTokens / 1000) * model.costPer1kOutput / 100,
     );
 
@@ -242,7 +248,7 @@ export class InferenceRouter {
       latencyMs,
       tier,
       taskType,
-      cacheHit: false,
+      cacheHit: cacheReadTokens > 0,
     });
 
     // 9. Build result

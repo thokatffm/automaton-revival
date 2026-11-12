@@ -169,6 +169,10 @@ export interface TokenUsage {
   promptTokens: number;
   completionTokens: number;
   totalTokens: number;
+  /** Prompt tokens served from the provider's prompt cache (billed at ~0.1x input). */
+  cacheReadTokens?: number;
+  /** Prompt tokens written to the provider's prompt cache (billed at ~1.25x input). */
+  cacheWriteTokens?: number;
 }
 
 // ─── Tool System ─────────────────────────────────────────────────

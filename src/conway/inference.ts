@@ -303,6 +303,28 @@ export function isThinkingClaudeModel(model: string): boolean {
   return /^claude-(opus|sonnet|haiku|fable|mythos)-5(?:$|[-.])/.test(model);
 }
 
+/**
+ * Everything before this marker in the system prompt is stable between turns
+ * (rules, identity, constitution, soul); the status block after it changes
+ * every turn. The split lets the stable part be served from the prompt cache.
+ */
+export const SYSTEM_PROMPT_CACHE_SPLIT = "--- CURRENT STATUS ---";
+
+/**
+ * Build the Anthropic system field. With a split marker the stable prefix
+ * becomes its own cached text block; otherwise the whole prompt is one block.
+ */
+export function buildAnthropicSystem(system: string): Array<Record<string, unknown>> {
+  const at = system.indexOf(SYSTEM_PROMPT_CACHE_SPLIT);
+  if (at <= 0) {
+    return [{ type: "text", text: system }];
+  }
+  return [
+    { type: "text", text: system.slice(0, at), cache_control: { type: "ephemeral" } },
+    { type: "text", text: system.slice(at) },
+  ];
+}
+
 /** Room for adaptive thinking plus the visible answer. */
 const ANTHROPIC_MIN_MAX_TOKENS = 16_000;
 
@@ -356,7 +378,7 @@ async function chatViaAnthropic(params: {
   };
 
   if (transformed.system) {
-    body.system = transformed.system;
+    body.system = buildAnthropicSystem(transformed.system);
   }
 
   // Claude 5-generation models return 400 for sampling parameters.
@@ -382,10 +404,12 @@ async function chatViaAnthropic(params: {
   }
 
   if (params.tools && params.tools.length > 0) {
-    body.tools = params.tools.map((tool) => ({
+    body.tools = params.tools.map((tool, index, all) => ({
       name: tool.function.name,
       description: tool.function.description,
       input_schema: tool.function.parameters,
+      // Tool schemas are identical every turn: cache them (tools render first).
+      ...(index === all.length - 1 ? { cache_control: { type: "ephemeral" } } : {}),
     }));
     body.tool_choice = { type: "auto" };
   }
@@ -431,10 +455,14 @@ async function chatViaAnthropic(params: {
 
   const promptTokens = data.usage?.input_tokens || 0;
   const completionTokens = data.usage?.output_tokens || 0;
+  const cacheReadTokens = data.usage?.cache_read_input_tokens || 0;
+  const cacheWriteTokens = data.usage?.cache_creation_input_tokens || 0;
   const usage: TokenUsage = {
     promptTokens,
     completionTokens,
-    totalTokens: promptTokens + completionTokens,
+    totalTokens: promptTokens + cacheReadTokens + cacheWriteTokens + completionTokens,
+    cacheReadTokens,
+    cacheWriteTokens,
   };
 
   return {
