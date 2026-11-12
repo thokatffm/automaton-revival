@@ -65,6 +65,8 @@ import { createWorkerInferenceBridge } from "./worker-inference-bridge.js";
 import { ProviderRegistry } from "../inference/provider-registry.js";
 import { UnifiedInferenceClient } from "../inference/inference-client.js";
 import { isIdleOnlyTool } from "./idle-only-tools.js";
+import { isSelfHosted } from "../backends/bootstrap.js";
+import type { ModelEntry } from "../types.js";
 
 const logger = createLogger("loop");
 const MAX_TOOL_CALLS_PER_TURN = 10;
@@ -122,7 +124,24 @@ export async function runAgentLoop(
     await discoverOllamaModels(ollamaBaseUrl, db.raw);
   }
   const budgetTracker = new InferenceBudgetTracker(db.raw, modelStrategyConfig);
-  const inferenceRouter = new InferenceRouter(db.raw, modelRegistry, budgetTracker);
+  // Self-hosted has no Conway fallback, so only route to models whose provider
+  // is configured. On the Conway backend every model stays routable (Conway
+  // serves whatever has no key of its own), as in the original runtime.
+  const providerAvailable = (entry: ModelEntry): boolean => {
+    switch (entry.provider) {
+      case "openai": return !!config.openaiApiKey;
+      case "anthropic": return !!config.anthropicApiKey;
+      case "ollama": return !!ollamaBaseUrl;
+      case "conway": return false;
+      default: return true;
+    }
+  };
+  const inferenceRouter = new InferenceRouter(
+    db.raw,
+    modelRegistry,
+    budgetTracker,
+    isSelfHosted(config) ? providerAvailable : undefined,
+  );
 
   // Optional orchestration bootstrap (requires V9 goals/task tables)
   let planModeController: PlanModeController | undefined;

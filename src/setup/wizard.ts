@@ -2,7 +2,7 @@ import fs from "fs";
 import path from "path";
 import chalk from "chalk";
 import type { AutomatonConfig, TreasuryPolicy, InfraBackend, SelfHostedConfig } from "../types.js";
-import { DEFAULT_TREASURY_POLICY, DEFAULT_SELF_HOSTED_CONFIG } from "../types.js";
+import { DEFAULT_TREASURY_POLICY, DEFAULT_SELF_HOSTED_CONFIG, DEFAULT_MODEL_STRATEGY_CONFIG } from "../types.js";
 import { getWallet, getAutomatonDir } from "../identity/wallet.js";
 import { provision } from "../identity/provision.js";
 import { createConfig, saveConfig } from "../config.js";
@@ -200,6 +200,19 @@ export async function runSetupWizard(): Promise<AutomatonConfig> {
   if (selfHosted) config.selfHosted = selfHosted;
   // Docker sandboxes are addressed by container name, not a Conway sandbox id.
   if (backend === "self-hosted") config.sandboxId = "";
+  // The defaults are OpenAI models. With only an Anthropic key, point every
+  // model slot at Claude so no code path asks for a model nobody can serve.
+  if (backend === "self-hosted" && anthropicApiKey && !openaiApiKey) {
+    config.inferenceModel = "claude-opus-5-5";
+    config.modelStrategy = {
+      ...DEFAULT_MODEL_STRATEGY_CONFIG,
+      ...(config.modelStrategy ?? {}),
+      inferenceModel: "claude-opus-5-5",
+      lowComputeModel: "claude-haiku-5-5",
+      criticalModel: "claude-haiku-5-5",
+    };
+    console.log(chalk.green("  Models: Claude Opus 5.5 (normal), Claude Haiku 5.5 (low compute / critical)"));
+  }
 
   saveConfig(config);
   console.log(chalk.green("  automaton.json written"));

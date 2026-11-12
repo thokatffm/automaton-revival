@@ -294,6 +294,45 @@ async function chatViaOpenAiCompatible(params: {
   };
 }
 
+/**
+ * Claude 5-generation models think on every request (adaptive thinking), reject
+ * sampling parameters, and tie their thinking blocks to the conversation that
+ * produced them.
+ */
+export function isThinkingClaudeModel(model: string): boolean {
+  return /^claude-(opus|sonnet|haiku|fable|mythos)-5(?:$|[-.])/.test(model);
+}
+
+/** Room for adaptive thinking plus the visible answer. */
+const ANTHROPIC_MIN_MAX_TOKENS = 16_000;
+
+/**
+ * The runtime stores turns as text + tool calls, which drops Claude's thinking
+ * blocks. Those blocks must be replayed unchanged next to their tool_use
+ * blocks, so the raw assistant content is kept here, keyed by the id of its
+ * first tool_use block. It lives in memory only: after a restart the history
+ * goes out without thinking, and the drop_block binding below keeps the API
+ * from rejecting that.
+ */
+const ANTHROPIC_RAW_CONTENT = new Map<string, unknown[]>();
+const ANTHROPIC_RAW_CONTENT_LIMIT = 200;
+
+function rememberAnthropicContent(content: unknown[]): void {
+  const firstToolUse = content.find((c: any) => c?.type === "tool_use") as { id?: string } | undefined;
+  if (!firstToolUse?.id) return;
+  if (!content.some((c: any) => c?.type === "thinking" || c?.type === "redacted_thinking")) return;
+  ANTHROPIC_RAW_CONTENT.set(firstToolUse.id, content);
+  while (ANTHROPIC_RAW_CONTENT.size > ANTHROPIC_RAW_CONTENT_LIMIT) {
+    const oldest = ANTHROPIC_RAW_CONTENT.keys().next().value as string;
+    ANTHROPIC_RAW_CONTENT.delete(oldest);
+  }
+}
+
+/** @internal exposed for tests */
+export function __clearAnthropicContentCacheForTest(): void {
+  ANTHROPIC_RAW_CONTENT.clear();
+}
+
 async function chatViaAnthropic(params: {
   model: string;
   tokenLimit: number;
@@ -304,9 +343,12 @@ async function chatViaAnthropic(params: {
   httpClient: ResilientHttpClient;
 }): Promise<InferenceResponse> {
   const transformed = transformMessagesForAnthropic(params.messages);
+  const thinkingModel = isThinkingClaudeModel(params.model);
   const body: Record<string, unknown> = {
     model: params.model,
-    max_tokens: params.tokenLimit,
+    max_tokens: thinkingModel
+      ? Math.max(params.tokenLimit, ANTHROPIC_MIN_MAX_TOKENS)
+      : params.tokenLimit,
     messages:
       transformed.messages.length > 0
         ? transformed.messages
@@ -317,8 +359,26 @@ async function chatViaAnthropic(params: {
     body.system = transformed.system;
   }
 
-  if (params.temperature !== undefined) {
+  // Claude 5-generation models return 400 for sampling parameters.
+  if (params.temperature !== undefined && !thinkingModel) {
     body.temperature = params.temperature;
+  }
+
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "x-api-key": params.anthropicApiKey,
+    "anthropic-version": "2023-06-01",
+  };
+
+  if (thinkingModel) {
+    // Thinking is always on for these models. The runtime rebuilds and trims
+    // its history between turns, which can invalidate earlier thinking blocks;
+    // drop_block makes the API discard those blocks instead of failing the turn.
+    body.thinking = {
+      type: "adaptive",
+      block_binding: { prefix_mismatch_behavior: "drop_block" },
+    };
+    headers["anthropic-beta"] = "thinking-binding-controls-2026-08-01";
   }
 
   if (params.tools && params.tools.length > 0) {
@@ -332,11 +392,7 @@ async function chatViaAnthropic(params: {
 
   const resp = await params.httpClient.request("https://api.anthropic.com/v1/messages", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": params.anthropicApiKey,
-      "anthropic-version": "2023-06-01",
-    },
+    headers,
     body: JSON.stringify(body),
     timeout: INFERENCE_TIMEOUT_MS,
   });
@@ -348,6 +404,7 @@ async function chatViaAnthropic(params: {
 
   const data = await resp.json() as any;
   const content = Array.isArray(data.content) ? data.content : [];
+  rememberAnthropicContent(content);
   const textBlocks = content.filter((c: any) => c?.type === "text");
   const toolUseBlocks = content.filter((c: any) => c?.type === "tool_use");
 
@@ -421,6 +478,20 @@ function transformMessagesForAnthropic(
     }
 
     if (msg.role === "assistant") {
+      // Replay Claude's original content (with its thinking blocks) unchanged
+      // when this is a tool-calling turn we still have in memory.
+      const firstToolCallId = msg.tool_calls?.[0]?.id;
+      const raw = firstToolCallId ? ANTHROPIC_RAW_CONTENT.get(firstToolCallId) : undefined;
+      const rawToolIds = raw
+        ? raw.filter((c: any) => c?.type === "tool_use").map((c: any) => String(c.id)).sort().join(",")
+        : "";
+      const msgToolIds = (msg.tool_calls || []).map((tc) => tc.id).sort().join(",");
+      // Only when every tool_use in the original turn was executed; otherwise
+      // the replay would carry tool_use blocks without a matching tool_result.
+      if (raw && rawToolIds === msgToolIds) {
+        transformed.push({ role: "assistant", content: [...raw] as Array<Record<string, unknown>> });
+        continue;
+      }
       const content: Array<Record<string, unknown>> = [];
       if (msg.content) {
         content.push({ type: "text", text: msg.content });
