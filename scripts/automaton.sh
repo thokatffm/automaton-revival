@@ -16,13 +16,13 @@ fi
 
 # Preflight: Node.js
 if ! command -v node >/dev/null 2>&1; then
-  echo "[ERROR] Node.js is required (>= 20). Install it first." >&2
+  echo "[ERROR] Node.js is required (>= 22). Install it first." >&2
   exit 1
 fi
 
 NODE_MAJOR=$(node -e "process.stdout.write(String(process.versions.node.split('.')[0]))")
-if [ "$NODE_MAJOR" -lt 20 ]; then
-  echo "[ERROR] Node.js >= 20 required, found $(node -v)." >&2
+if [ "$NODE_MAJOR" -lt 22 ]; then
+  echo "[ERROR] Node.js >= 22 required, found $(node -v)." >&2
   exit 1
 fi
 
