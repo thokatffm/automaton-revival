@@ -65,6 +65,16 @@ A child gets a `genesis.json` with `backend: "self-hosted"`, configures itself f
 
 A child cannot mint credits by writing files. If delivery fails, the parent is refunded. Vouchers are EVM-only for now.
 
+## Testing against real Docker
+
+The normal test suite mocks Docker. To run the driver and voucher delivery against a real daemon (starts and removes a few `alpine:3.20` containers):
+
+```bash
+AUTOMATON_DOCKER_IT=1 pnpm vitest run src/__tests__/backends/docker.integration.test.ts
+```
+
+Use `AUTOMATON_DOCKER_IT_IMAGE` to test another image.
+
 ## Not covered yet
 
 - Exposing ports of a Docker sandbox after it was created. Publish ports at `docker run` time instead.
