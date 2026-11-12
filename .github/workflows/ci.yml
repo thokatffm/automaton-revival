@@ -22,7 +22,9 @@ jobs:
         node-version: [22, 24, 26]
         include:
           # The fork is developed on Windows; keep the path handling honest there.
-          - os: windows-latest
+          # better-sqlite3 compiles from source, and node-gyp does not yet detect
+          # the Visual Studio 18 that windows-latest ships, so pin VS 2022.
+          - os: windows-2022
             node-version: 26
     steps:
       - uses: actions/checkout@v4
