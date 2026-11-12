@@ -80,4 +80,4 @@ Use `AUTOMATON_DOCKER_IT_IMAGE` to test another image.
 - Exposing ports of a Docker sandbox after it was created. Publish ports at `docker run` time instead.
 - Grandchildren: a child inside a container has no Docker daemon, so its `spawn_child` fails cleanly.
 - Turning earned USDC into ledger credits. Today only the creator (`automaton-cli fund`) and the parent (vouchers) add credits.
-- The social relay still defaults to `social.conway.tech`. Set `socialRelayUrl` to your own relay or remove it.
+- Agent-to-agent messaging needs a relay. Self-hosted automatons ignore Conway's `social.conway.tech` and run without one until you set `socialRelayUrl` to a relay you run; until then `send_message` and `message_child` report that no relay is configured.

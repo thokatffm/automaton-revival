@@ -19,6 +19,7 @@ import {
   configFromGenesis,
   removeBootstrapSecrets,
   isSelfHosted,
+  resolveSocialRelayUrl,
 } from "./backends/bootstrap.js";
 import { createHeartbeatDaemon } from "./heartbeat/daemon.js";
 import {
@@ -327,9 +328,12 @@ async function run(): Promise<void> {
 
   // Create social client (chain-aware: pass ChainIdentity for Solana signing)
   let social: SocialClientInterface | undefined;
-  if (config.socialRelayUrl) {
-    social = createSocialClient(config.socialRelayUrl, resolvedChainType === "solana" ? chainIdentity : account);
-    logger.info(`[${new Date().toISOString()}] Social relay: ${config.socialRelayUrl}`);
+  const socialRelayUrl = resolveSocialRelayUrl(config);
+  if (socialRelayUrl) {
+    social = createSocialClient(socialRelayUrl, resolvedChainType === "solana" ? chainIdentity : account);
+    logger.info(`[${new Date().toISOString()}] Social relay: ${socialRelayUrl}`);
+  } else if (selfHosted) {
+    logger.info(`[${new Date().toISOString()}] Social relay: none (set socialRelayUrl to a relay you run)`);
   }
 
   // Initialize PolicyEngine + SpendTracker (Phase 1.4)

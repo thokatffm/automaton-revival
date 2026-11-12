@@ -24,6 +24,26 @@ export function isSelfHosted(config: Pick<AutomatonConfig, "backend">): boolean 
   return config.backend === "self-hosted";
 }
 
+/** The relay Conway ran. It is filled in as a default for every config. */
+export const CONWAY_SOCIAL_RELAY_URL = "https://social.conway.tech";
+
+/**
+ * The social relay to use, or undefined for none. A self-hosted automaton
+ * does not talk to Conway's relay: messages there would go to a service that
+ * no longer answers, or to whoever runs that domain next. An explicitly
+ * configured relay of your own is used as before.
+ */
+export function resolveSocialRelayUrl(
+  config: Pick<AutomatonConfig, "backend" | "socialRelayUrl">,
+): string | undefined {
+  const url = config.socialRelayUrl?.trim();
+  if (!url) return undefined;
+  if (isSelfHosted(config) && url.replace(/[/]+$/, "") === CONWAY_SOCIAL_RELAY_URL) {
+    return undefined;
+  }
+  return url;
+}
+
 export function resolveSelfHostedConfig(config: Pick<AutomatonConfig, "selfHosted">): SelfHostedConfig {
   return { ...DEFAULT_SELF_HOSTED_CONFIG, ...(config.selfHosted ?? {}) };
 }

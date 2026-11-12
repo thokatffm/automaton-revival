@@ -119,3 +119,14 @@ describe("spawn environment", () => {
     configureSpawnEnvironment({ genesisExtras: {}, secrets: null });
   });
 });
+
+describe("social relay", () => {
+  it("self-hosted never uses Conway's relay; your own relay still works", async () => {
+    const { resolveSocialRelayUrl } = await import("../../backends/bootstrap.js");
+    expect(resolveSocialRelayUrl({ backend: "self-hosted", socialRelayUrl: "https://social.conway.tech" })).toBeUndefined();
+    expect(resolveSocialRelayUrl({ backend: "self-hosted", socialRelayUrl: "https://social.conway.tech/" })).toBeUndefined();
+    expect(resolveSocialRelayUrl({ backend: "self-hosted", socialRelayUrl: "https://relay.example.org" })).toBe("https://relay.example.org");
+    expect(resolveSocialRelayUrl({ backend: "self-hosted", socialRelayUrl: "" })).toBeUndefined();
+    expect(resolveSocialRelayUrl({ backend: "conway", socialRelayUrl: "https://social.conway.tech" })).toBe("https://social.conway.tech");
+  });
+});
