@@ -35,14 +35,15 @@ describe("routing with only an Anthropic key", () => {
   afterEach(() => db.close());
 
   it("routes agent turns to Opus and cheap tasks to Haiku", () => {
-    expect(router.selectModel("normal", "agent_turn")?.modelId).toBe("claude-opus-5-5");
+    expect(router.selectModel("high", "agent_turn")?.modelId).toBe("claude-opus-5-5");
+    expect(router.selectModel("normal", "agent_turn")?.modelId).toBe("claude-haiku-5-5");
     expect(router.selectModel("normal", "heartbeat_triage")?.modelId).toBe("claude-haiku-5-5");
     expect(router.selectModel("low_compute", "agent_turn")?.modelId).toBe("claude-haiku-5-5");
     expect(router.selectModel("critical", "agent_turn")?.modelId).toBe("claude-haiku-5-5");
   });
 
   it("prices Claude models so spend reaches the credit ledger", () => {
-    const opus = router.selectModel("normal", "agent_turn")!;
+    const opus = router.selectModel("high", "agent_turn")!;
     // 10k input + 1k output on Opus 5.5 = $0.04 + $0.02 = 6 cents
     const cents = Math.ceil((10_000 / 1000) * opus.costPer1kInput / 100 + (1_000 / 1000) * opus.costPer1kOutput / 100);
     expect(cents).toBe(6);
@@ -218,7 +219,7 @@ describe("prompt caching", () => {
     const budget = new InferenceBudgetTracker(db, DEFAULT_MODEL_STRATEGY_CONFIG);
     const router = new InferenceRouter(db, registry, budget, (m) => m.provider === "anthropic");
     const result = await router.route(
-      { messages: [{ role: "user", content: "hi" }], taskType: "agent_turn", tier: "normal", sessionId: "s", turnId: "t" },
+      { messages: [{ role: "user", content: "hi" }], taskType: "agent_turn", tier: "high", sessionId: "s", turnId: "t" },
       async () => ({
         id: "m", model: "claude-opus-5-5",
         message: { role: "assistant", content: "ok" },
