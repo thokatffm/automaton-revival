@@ -226,3 +226,62 @@ describe("x402 seller guards", () => {
     expect(res.status).toBe(400);
   });
 });
+
+describe("on-chain settler", () => {
+  it("submits transferWithAuthorization with the split signature and returns the tx hash", async () => {
+    const { makeOnchainSettler } = await import("../conway/x402-seller.js");
+    const { parseSignature } = await import("viem");
+    const calls: any[] = [];
+    const seller = privateKeyToAccount(generatePrivateKey());
+    const settle = makeOnchainSettler({
+      account: seller,
+      asset: SEP_USDC,
+      clients: {
+        writeContract: async (args) => { calls.push(args); return "0xabc0000000000000000000000000000000000000000000000000000000000001"; },
+        waitForTransactionReceipt: async () => ({ status: "success" }),
+      },
+    });
+    const payment = await signPayment();
+    const a = payment.payload.authorization;
+    const hash = await settle(
+      { from: a.from as any, to: a.to as any, value: BigInt(a.value), validAfter: BigInt(a.validAfter), validBefore: BigInt(a.validBefore), nonce: a.nonce as any },
+      payment.payload.signature as any,
+    );
+    expect(hash).toMatch(/^0xabc/);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].functionName).toBe("transferWithAuthorization");
+    expect(calls[0].address).toBe(SEP_USDC);
+    expect(calls[0].chain.id).toBe(84532);
+    const { r, s } = parseSignature(payment.payload.signature as any);
+    const args = calls[0].args;
+    expect(args.slice(0, 6)).toEqual([a.from, a.to, BigInt(a.value), BigInt(a.validAfter), BigInt(a.validBefore), a.nonce]);
+    expect([27, 28]).toContain(args[6]);
+    expect(args[7]).toBe(r);
+    expect(args[8]).toBe(s);
+  });
+
+  it("throws when the settlement transaction reverts", async () => {
+    const { makeOnchainSettler } = await import("../conway/x402-seller.js");
+    const settle = makeOnchainSettler({
+      account: privateKeyToAccount(generatePrivateKey()),
+      asset: SEP_USDC,
+      clients: {
+        writeContract: async () => "0xdead000000000000000000000000000000000000000000000000000000000002",
+        waitForTransactionReceipt: async () => ({ status: "reverted" }),
+      },
+    });
+    const payment = await signPayment();
+    const a = payment.payload.authorization;
+    await expect(
+      settle({ from: a.from as any, to: a.to as any, value: BigInt(a.value), validAfter: BigInt(a.validAfter), validBefore: BigInt(a.validBefore), nonce: a.nonce as any }, payment.payload.signature as any),
+    ).rejects.toThrow(/reverted/);
+  });
+
+  it("refuses mainnet unless explicitly allowed", async () => {
+    const { makeOnchainSettler } = await import("../conway/x402-seller.js");
+    const { base } = await import("viem/chains");
+    expect(() =>
+      makeOnchainSettler({ account: privateKeyToAccount(generatePrivateKey()), asset: SEP_USDC, chain: base }),
+    ).toThrow(/allowMainnet/);
+  });
+});

@@ -6,7 +6,18 @@
  */
 
 import http from "http";
-import { verifyTypedData, type Address, type Hex } from "viem";
+import {
+  createPublicClient,
+  createWalletClient,
+  http as viemHttp,
+  parseSignature,
+  verifyTypedData,
+  type Address,
+  type Chain,
+  type Hex,
+  type PrivateKeyAccount,
+} from "viem";
+import { baseSepolia } from "viem/chains";
 
 export interface Authorization {
   from: Address;
@@ -202,4 +213,86 @@ export function startLocalSeller(
     res.end(JSON.stringify(out.body));
   });
   return new Promise((resolve) => server.listen(port, "127.0.0.1", () => resolve(server)));
+}
+
+/** EIP-3009 entry point of USDC (FiatToken v2), v/r/s overload. */
+const USDC_TRANSFER_WITH_AUTHORIZATION_ABI = [
+  {
+    name: "transferWithAuthorization",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "from", type: "address" },
+      { name: "to", type: "address" },
+      { name: "value", type: "uint256" },
+      { name: "validAfter", type: "uint256" },
+      { name: "validBefore", type: "uint256" },
+      { name: "nonce", type: "bytes32" },
+      { name: "v", type: "uint8" },
+      { name: "r", type: "bytes32" },
+      { name: "s", type: "bytes32" },
+    ],
+    outputs: [],
+  },
+] as const;
+
+/** Minimal client surface the settler needs; injectable for tests. */
+export interface SettlerClients {
+  writeContract: (args: any) => Promise<Hex>;
+  waitForTransactionReceipt: (args: { hash: Hex }) => Promise<{ status: "success" | "reverted" }>;
+}
+
+export interface OnchainSettlerOptions {
+  /** Wallet that submits the transaction and pays its gas (the seller). */
+  account: PrivateKeyAccount;
+  /** USDC contract on the chosen chain. */
+  asset: Address;
+  /** Defaults to Base Sepolia (testnet). */
+  chain?: Chain;
+  rpcUrl?: string;
+  /** Settling real money is refused unless this is set explicitly. */
+  allowMainnet?: boolean;
+  clients?: SettlerClients;
+}
+
+/**
+ * Settle a verified payment by submitting the payer's signed authorization to
+ * the USDC contract. The seller pays the gas; the USDC moves from payer to
+ * payTo as signed. Testnet only unless allowMainnet is set.
+ */
+export function makeOnchainSettler(opts: OnchainSettlerOptions): Settler {
+  const chain = opts.chain ?? baseSepolia;
+  if (chain.id !== baseSepolia.id && !opts.allowMainnet) {
+    throw new Error(`On-chain settlement on chain ${chain.id} needs allowMainnet: true. Only Base Sepolia is allowed by default.`);
+  }
+
+  const clients: SettlerClients =
+    opts.clients ??
+    (() => {
+      const transport = viemHttp(opts.rpcUrl);
+      const wallet = createWalletClient({ account: opts.account, chain, transport });
+      const pub = createPublicClient({ chain, transport });
+      return {
+        writeContract: (args) => wallet.writeContract(args),
+        waitForTransactionReceipt: (args) => pub.waitForTransactionReceipt(args),
+      };
+    })();
+
+  return async (auth, signature) => {
+    const { r, s, v, yParity } = parseSignature(signature);
+    const vNumber = v !== undefined ? Number(v) : yParity + 27;
+    const hash = await clients.writeContract({
+      address: opts.asset,
+      abi: USDC_TRANSFER_WITH_AUTHORIZATION_ABI,
+      functionName: "transferWithAuthorization",
+      args: [auth.from, auth.to, auth.value, auth.validAfter, auth.validBefore, auth.nonce, vNumber, r, s],
+      account: opts.account,
+      chain,
+    });
+    const receipt = await clients.waitForTransactionReceipt({ hash });
+    if (receipt.status !== "success") {
+      throw new Error(`Settlement transaction reverted: ${hash}`);
+    }
+    return hash;
+  };
 }

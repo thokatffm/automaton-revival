@@ -16,7 +16,9 @@ import { base, baseSepolia } from "viem/chains";
 import { ResilientHttpClient } from "./http-client.js";
 import type { ChainType } from "../identity/chain.js";
 
-const x402HttpClient = new ResilientHttpClient();
+// Plain http is allowed only for this machine (127.0.0.1 / localhost), e.g. a
+// local test seller. Every other x402 target still needs https.
+const x402HttpClient = new ResilientHttpClient({ allowHttpOnLoopback: true });
 
 // USDC contract addresses
 const USDC_ADDRESSES: Record<string, Address> = {
