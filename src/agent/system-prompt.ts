@@ -653,6 +653,15 @@ Your chain type is ${chainType}.`,
     );
   }
 
+  // Creator directives: set in automaton.json by the creator, which the agent
+  // cannot change. Shown as trusted, unlike the self-evolved genesis text above.
+  if (config.creatorDirectives) {
+    const directives = config.creatorDirectives.slice(0, 4000);
+    sections.push(
+      `## CREATOR DIRECTIVES [TRUSTED: set by your creator, not by you]\n${directives}\n## End Creator Directives`,
+    );
+  }
+
   // Layer 5: Active skill instructions (untrusted content with trust boundary markers)
   if (skills && skills.length > 0) {
     const skillInstructions = getActiveSkillInstructions(skills);

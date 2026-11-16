@@ -341,6 +341,19 @@ export async function checkX402(
   }
 }
 
+/** Cents signed for the most recent x402Fetch call (at least 1 once signed). */
+let lastPaymentCents = 0;
+
+/**
+ * Read and clear the amount of the last x402 payment. Spend tracking uses this
+ * so that every payment counts against the daily cap, not just a nominal zero.
+ */
+export function takeLastX402PaymentCents(): number {
+  const cents = lastPaymentCents;
+  lastPaymentCents = 0;
+  return cents;
+}
+
 /**
  * Fetch a URL with automatic x402 payment.
  * If the endpoint returns 402, sign and pay, then retry.
@@ -354,6 +367,7 @@ export async function x402Fetch(
   maxPaymentCents?: number,
   chainType?: ChainType,
 ): Promise<X402PaymentResult> {
+  lastPaymentCents = 0;
   // Solana wallets cannot sign EVM x402 payments
   if (chainType === "solana") {
     return {
@@ -420,6 +434,14 @@ export async function x402Fetch(
         status: initialResp.status,
       };
     }
+
+    // The signature exists now, so the payment may be spent even if the
+    // retry fails. Record it before sending. 1 cent = 10,000 atomic USDC units.
+    const signedAtomic = parseMaxAmountRequired(
+      parsed.requirement.maxAmountRequired,
+      parsed.x402Version,
+    );
+    lastPaymentCents = Math.max(1, Math.ceil(Number(signedAtomic) / 10_000));
 
     // Retry with payment
     const paymentHeader = Buffer.from(

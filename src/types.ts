@@ -67,6 +67,11 @@ export interface AutomatonConfig {
   childSandboxMemoryMb?: number;
   parentAddress?: string;
   socialRelayUrl?: string;
+  /**
+   * Standing instructions from the creator, shown to the agent as trusted.
+   * Lives in automaton.json, which the agent cannot modify.
+   */
+  creatorDirectives?: string;
   treasuryPolicy?: TreasuryPolicy;
   // Phase 2 config additions
   soulConfig?: SoulConfig;
@@ -606,6 +611,8 @@ export interface LimitCheckResult {
 }
 
 export interface TreasuryPolicy {
+  /** Total x402 payments per day, in cents. Defaults to 50x the per-payment cap. */
+  maxX402DailyCents?: number;
   maxSingleTransferCents: number;
   maxHourlyTransferCents: number;
   maxDailyTransferCents: number;

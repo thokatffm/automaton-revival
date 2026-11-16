@@ -6,7 +6,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { privateKeyToAccount, generatePrivateKey } from "viem/accounts";
 import { verifyTypedData } from "viem";
-import { x402Fetch } from "../conway/x402.js";
+import { x402Fetch, takeLastX402PaymentCents } from "../conway/x402.js";
 
 const BASE_USDC = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
 const PAY_TO = "0xb8003C6190AA56EA25309B36107FA41bB9518A5F";
@@ -61,6 +61,9 @@ describe("x402Fetch with a v2 server", () => {
     const res = await x402Fetch(URL, account, "GET", undefined, undefined, 1);
     expect(res.success).toBe(true);
     expect(res.settlement).toEqual({ success: true, transaction: "0xabc", network: "eip155:8453", payer: account.address });
+    // 1000 atomic units = 0.001 USDC = 0.1 cent, counted as one whole cent.
+    expect(takeLastX402PaymentCents()).toBe(1);
+    expect(takeLastX402PaymentCents()).toBe(0);
 
     const paid = requests[1].headers;
     expect(paid["x-payment"]).toBeUndefined();

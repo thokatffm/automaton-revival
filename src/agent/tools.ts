@@ -3425,6 +3425,22 @@ export async function executeTool(
   }
 
   try {
+    if (toolName === "x402_fetch" && turnContext) {
+      const { DEFAULT_TREASURY_POLICY } = await import("../types.js");
+      const policy = context.config.treasuryPolicy ?? DEFAULT_TREASURY_POLICY;
+      const dailyCap = policy.maxX402DailyCents ?? policy.maxX402PaymentCents * 50;
+      if (turnContext.sessionSpend.getDailySpend("x402") >= dailyCap) {
+        return {
+          id: ulid(),
+          name: toolName,
+          arguments: args,
+          result: "",
+          durationMs: Date.now() - startTime,
+          error: `Blocked: the daily x402 limit of ${dailyCap} cents is used up. No payment was made.`,
+        };
+      }
+    }
+
     let result = await tool.execute(args, context);
 
     // Sanitize results from external source tools
@@ -3457,7 +3473,7 @@ export async function executeTool(
         try {
           turnContext.sessionSpend.recordSpend({
             toolName: "x402_fetch",
-            amountCents: 0, // Actual amount is inside the x402 protocol
+            amountCents: (await import("../conway/x402.js")).takeLastX402PaymentCents(),
             domain: (() => {
               try {
                 return new URL(args.url as string).hostname;
