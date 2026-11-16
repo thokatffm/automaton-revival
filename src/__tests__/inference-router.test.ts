@@ -290,7 +290,7 @@ describe("InferenceRouter", () => {
 
     it("computes actualCostCents accurately from token usage", async () => {
       // gpt-5.2 has costPer1kInput=20, costPer1kOutput=80 (hundredths of cents)
-      // Formula: Math.ceil((input/1000)*costPer1kInput/100 + (output/1000)*costPer1kOutput/100)
+      // Formula: (input/1000)*costPer1kInput/100 + (output/1000)*costPer1kOutput/100 (no rounding up)
       const mockChat = async (_msgs: any[], _opts: any) => ({
         message: { content: "result", role: "assistant" },
         usage: { promptTokens: 1000, completionTokens: 500 },
@@ -311,7 +311,8 @@ describe("InferenceRouter", () => {
       // (1000/1000)*300/100 + (500/1000)*1500/100 = 3 + 7.5 = 10.5 => ceil = 11
       expect(result.costCents).toBeGreaterThan(0);
       expect(typeof result.costCents).toBe("number");
-      expect(Number.isInteger(result.costCents)).toBe(true);
+      // gpt-5.2 prices 18 and 140 (hundredths of cents per 1k): 1k in + 0.5k out = 0.18 + 0.70 = 0.88 cents, not rounded up.
+      expect(result.costCents).toBeCloseTo(0.88, 4);
 
       // Verify the recorded cost matches
       const costs = inferenceGetSessionCosts(db, "cost-accuracy-session");

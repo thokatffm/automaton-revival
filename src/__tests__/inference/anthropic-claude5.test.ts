@@ -226,8 +226,8 @@ describe("prompt caching", () => {
         finishReason: "stop",
       }) as any,
     );
-    // Opus 5.5: 1k input = 0.4c, 20k cache read = 0.8c, 500 output = 1.0c -> 2.2c -> 3c
-    expect(result.costCents).toBe(3);
+    // Opus 5.5: 1k input = 0.4c, 20k cache read = 0.8c, 500 output = 1.0c -> 2.2c (no rounding up)
+    expect(result.costCents).toBeCloseTo(2.2, 4);
     const row = db.prepare("SELECT cache_hit FROM inference_costs").get() as { cache_hit: number };
     expect(row.cache_hit).toBe(1);
     db.close();

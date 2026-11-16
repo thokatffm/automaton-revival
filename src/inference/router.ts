@@ -43,6 +43,14 @@ export function isClientRejection(error: unknown): boolean {
   return status >= 400 && status < 500 && status !== 408 && status !== 429;
 }
 
+/**
+ * Cost in cents, kept to four decimals. Rounding every call up to a whole
+ * cent overcharged small calls about tenfold (a 10k-token Haiku call is 0.1c).
+ */
+function exactCents(value: number): number {
+  return Math.round(value * 10_000) / 10_000;
+}
+
 export class InferenceRouter {
   private db: Database;
   private registry: ModelRegistry;
@@ -94,7 +102,7 @@ export class InferenceRouter {
 
     // 2. Estimate cost and check budget
     const estimatedTokens = messages.reduce((sum, m) => sum + (m.content?.length || 0) / 4, 0);
-    const estimatedCostCents = Math.ceil(
+    const estimatedCostCents = exactCents(
       (estimatedTokens / 1000) * model.costPer1kInput / 100 +
       (request.maxTokens || 1000) / 1000 * model.costPer1kOutput / 100,
     );
@@ -229,7 +237,7 @@ export class InferenceRouter {
     const cacheWriteTokens = response.usage?.cacheWriteTokens || 0;
     // Anthropic bills cache reads at 0.1x and 5-minute cache writes at 1.25x
     // the input price; both are reported apart from input_tokens.
-    const actualCostCents = Math.ceil(
+    const actualCostCents = exactCents(
       (inputTokens / 1000) * model.costPer1kInput / 100 +
       (cacheReadTokens / 1000) * model.costPer1kInput * 0.1 / 100 +
       (cacheWriteTokens / 1000) * model.costPer1kInput * 1.25 / 100 +
@@ -440,7 +448,7 @@ export class InferenceRouter {
       chars += (msg.content ?? "").length;
     }
     const inputTokens = Math.ceil(chars / 4);
-    const costCents = Math.ceil((inputTokens / 1000) * model.costPer1kInput / 100);
+    const costCents = exactCents((inputTokens / 1000) * model.costPer1kInput / 100);
     return { inputTokens, costCents };
   }
 }
