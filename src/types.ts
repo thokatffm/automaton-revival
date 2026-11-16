@@ -1283,6 +1283,8 @@ export interface ModelStrategyConfig {
   criticalModel: string;
   maxTokensPerTurn: number;
   hourlyBudgetCents: number; // default: 0 (no limit)
+  /** Total inference spend per day, in cents. 0 = no limit. */
+  dailyBudgetCents?: number;
   sessionBudgetCents: number; // default: 0 (no limit)
   perCallCeilingCents: number; // default: 0 (no limit)
   enableModelFallback: boolean; // default: true

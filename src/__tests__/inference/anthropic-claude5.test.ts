@@ -258,3 +258,21 @@ describe("history ending on an assistant turn", () => {
     expect(sent.messages[sent.messages.length - 2].role).toBe("assistant");
   });
 });
+
+describe("daily inference budget", () => {
+  it("refuses calls once today's spend plus the estimate exceeds the daily cap", async () => {
+    const { InferenceBudgetTracker } = await import("../../inference/budget.js");
+    const db = new Database(":memory:");
+    db.exec(MIGRATION_V6);
+    const tracker = new InferenceBudgetTracker(db, { ...DEFAULT_MODEL_STRATEGY_CONFIG, dailyBudgetCents: 10 });
+    tracker.recordCost({
+      sessionId: "s", turnId: null, model: "claude-haiku-5-5", provider: "anthropic",
+      inputTokens: 1, outputTokens: 1, costCents: 9, latencyMs: 1, tier: "normal", taskType: "agent_turn", cacheHit: false,
+    } as any);
+    expect(tracker.checkBudget(1, "claude-haiku-5-5").allowed).toBe(true);
+    const refused = tracker.checkBudget(2, "claude-haiku-5-5");
+    expect(refused.allowed).toBe(false);
+    expect(refused.reason).toMatch(/Daily budget exhausted/);
+    db.close();
+  });
+});

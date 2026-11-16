@@ -43,6 +43,18 @@ export class InferenceBudgetTracker {
       };
     }
 
+    // Daily budget check (applies to every model call, including local ones
+    // with a zero price, which is why it is measured on actual spend).
+    if (this.config.dailyBudgetCents && this.config.dailyBudgetCents > 0) {
+      const dailyCost = this.getDailyCost();
+      if (dailyCost + estimatedCostCents > this.config.dailyBudgetCents) {
+        return {
+          allowed: false,
+          reason: `Daily budget exhausted: ${dailyCost}c spent today + ${estimatedCostCents}c estimated > ${this.config.dailyBudgetCents}c limit`,
+        };
+      }
+    }
+
     // Hourly budget check
     if (this.config.hourlyBudgetCents > 0) {
       const hourlyCost = this.getHourlyCost();
