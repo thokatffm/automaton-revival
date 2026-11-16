@@ -233,3 +233,28 @@ describe("prompt caching", () => {
     db.close();
   });
 });
+
+describe("history ending on an assistant turn", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("appends a user turn instead of sending a prefill", async () => {
+    const { ANTHROPIC_CONTINUE_PROMPT } = await import("../../conway/inference.js");
+    let sent: any;
+    vi.stubGlobal("fetch", vi.fn(async (_u: string, init: RequestInit) => {
+      sent = JSON.parse(String(init.body));
+      return new Response(JSON.stringify({ id: "m", content: [{ type: "text", text: "ok" }], usage: {}, stop_reason: "end_turn" }), { status: 200 });
+    }));
+    const client = createInferenceClient({
+      apiUrl: "", apiKey: "", defaultModel: "claude-haiku-5-5", maxTokens: 1024,
+      anthropicApiKey: "sk-ant-test", conwayEnabled: false, getModelProvider: () => "anthropic",
+    });
+    await client.chat([
+      { role: "system", content: "sys" },
+      { role: "user", content: "wake up" },
+      { role: "assistant", content: "I looked back over the session." },
+    ]);
+    const last = sent.messages[sent.messages.length - 1];
+    expect(last).toEqual({ role: "user", content: ANTHROPIC_CONTINUE_PROMPT });
+    expect(sent.messages[sent.messages.length - 2].role).toBe("assistant");
+  });
+});

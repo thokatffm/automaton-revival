@@ -571,11 +571,27 @@ function transformMessagesForAnthropic(
     }
   }
 
+  // The agent loop replays its own last turn as history. When that turn was
+  // text only (no tool calls), the conversation ends on an assistant message,
+  // which current Claude models reject as prefill (400). Hand the turn back
+  // to the model with a short user message instead.
+  const last = transformed[transformed.length - 1];
+  if (last && last.role === "assistant") {
+    transformed.push({
+      role: "user",
+      content: ANTHROPIC_CONTINUE_PROMPT,
+    });
+  }
+
   return {
     system: systemParts.length > 0 ? systemParts.join("\n\n") : undefined,
     messages: transformed,
   };
 }
+
+/** Appended when the history ends on an assistant turn (prefill is rejected). */
+export const ANTHROPIC_CONTINUE_PROMPT =
+  "[system] Continue. Decide your next step and act on it, or sleep if there is nothing to do.";
 
 function parseToolArguments(raw: string): Record<string, unknown> {
   try {
